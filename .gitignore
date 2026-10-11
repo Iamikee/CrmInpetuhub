@@ -5,6 +5,8 @@ node_modules/
 dist/
 *.log
 
+´´´git add .; if ($?) { git commit -m "Alterar o git ignore" }; if ($?) { git push }´´´
+
 # Ambiente e segredos
 .env
 .env.*
