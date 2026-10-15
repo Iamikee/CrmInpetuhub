@@ -178,16 +178,7 @@ public class UsuarioController {
     @Transactional(readOnly = true)
     public ResponseEntity<byte[]> fotoCadastro(@PathVariable Integer id, Authentication auth,
             @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
-        Usuario solicitante = usuarioAutenticado(auth);
-        if (!id.equals(solicitante.getIdUsuario())) {
-            Usuario cadastro = usuarios.findById(id)
-                    .filter(usuario -> Integer.valueOf(4).equals(usuario.getIdPerfil()))
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "Foto de perfil não encontrada."));
-            if (solicitante.getIdPerfil() == null || solicitante.getIdPerfil() >= 4) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Foto de perfil não encontrada.");
-            }
-        }
+        usuarioAutenticado(auth);
         return respostaFoto(id, ifNoneMatch);
     }
 
@@ -397,15 +388,21 @@ public class UsuarioController {
         return resumo(usuario);
     }
 
-    @PatchMapping("/{id}/perfil") @PreAuthorize("hasRole('COORDENADOR')")
+    @PatchMapping("/{id}/perfil") @PreAuthorize("hasRole('COORDENADOR')") @Transactional
     public UsuarioResumo alterarPerfil(@PathVariable Integer id, @RequestBody Map<String, Integer> body, Authentication auth) {
         Integer perfil = body.get("idPerfil");
-        if (perfil == null || perfil < 1 || perfil > 3) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O perfil deve ser Coordenador, Gestor de Espaços ou Staff.");
+        if (perfil == null || perfil < 1 || perfil > 4) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O perfil deve ser Coordenador, Gestor de Espaços, Staff ou Solicitante.");
         Usuario usuario = usuarios.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado."));
         if (usuario.getEmail().equalsIgnoreCase(auth.getName()))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "O coordenador não pode alterar o próprio perfil de acesso.");
-        Integer anterior = usuario.getIdPerfil(); usuario.setIdPerfil(perfil); Usuario salvo = usuarios.save(usuario);
-        registrar("usuario", id, "ALTERACAO_PERFIL", "Perfil alterado de " + anterior + " para " + perfil, auth.getName());
+        Integer anterior = usuario.getIdPerfil();
+        usuario.setIdPerfil(perfil);
+        usuario.setVersaoToken((usuario.getVersaoToken() == null ? 0 : usuario.getVersaoToken()) + 1);
+        Usuario salvo = usuarios.save(usuario);
+        registrar("usuario", id, "ALTERACAO_PERFIL",
+                "Perfil alterado de " + nomePerfil(anterior) + " para " + nomePerfil(perfil)
+                        + ". Sessões anteriores invalidadas.",
+                auth.getName());
         return resumo(salvo);
     }
 
@@ -436,6 +433,15 @@ public class UsuarioController {
                 u.getCargoVinculo(), u.getIdPerfil(), u.getIdOrganizacao(), u.getAtivo(),
                 u.getIdPersona(), u.getDataCadastro(), foto != null,
                 foto == null ? 0L : foto.getAtualizadaEm().toInstant(ZoneOffset.UTC).toEpochMilli());
+    }
+    private String nomePerfil(Integer perfil) {
+        return switch (perfil == null ? 0 : perfil) {
+            case 1 -> "Coordenador";
+            case 2 -> "Gestor de Espaços";
+            case 3 -> "Staff/Atendente";
+            case 4 -> "Solicitante";
+            default -> "Desconhecido";
+        };
     }
     private Usuario usuarioAutenticado(Authentication auth) {
         return usuarios.findByEmailIgnoreCase(auth.getName())

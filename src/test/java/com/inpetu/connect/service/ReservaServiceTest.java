@@ -113,6 +113,9 @@ class ReservaServiceTest {
 
         assertEquals("Pendente", reserva.getStatusReserva());
         verify(reservas).save(reserva);
+        verify(notificacoes).enviar(eq(List.of(usuario)), eq("RESERVA_CRIADA"),
+                eq("Solicitação de reserva recebida"), anyString());
+        verify(usuarios, never()).findAllByAtivoTrueAndIdPerfilLessThan(4);
     }
 
     @Test

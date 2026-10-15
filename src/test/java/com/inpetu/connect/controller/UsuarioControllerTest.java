@@ -27,8 +27,14 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.Objects;
 import java.util.Optional;
 import java.time.LocalDateTime;
 
@@ -106,6 +112,32 @@ class UsuarioControllerTest {
         assertEquals(1, coordenador.getIdPerfil());
         verify(usuarios, never()).save(any());
         verifyNoInteractions(auditoria);
+    }
+
+    @Test
+    void coordenadorPodePromoverSolicitanteEInvalidaSessoesAnteriores() {
+        Usuario solicitante = new Usuario();
+        solicitante.setIdUsuario(9);
+        solicitante.setEmail("solicitante@example.org");
+        solicitante.setIdPerfil(4);
+        solicitante.setVersaoToken(2);
+        Usuario coordenador = new Usuario();
+        coordenador.setIdUsuario(1);
+        when(usuarios.findById(9)).thenReturn(Optional.of(solicitante));
+        when(usuarios.save(solicitante)).thenReturn(solicitante);
+        when(authentication.getName()).thenReturn("coord@example.org");
+        when(usuarios.findByEmail("coord@example.org")).thenReturn(Optional.of(coordenador));
+
+        UsuarioResumo result = controller.alterarPerfil(9, java.util.Map.of("idPerfil", 3), authentication);
+
+        assertEquals(3, result.idPerfil());
+        assertEquals(3, solicitante.getIdPerfil());
+        assertEquals(3, solicitante.getVersaoToken());
+        ArgumentCaptor<LogAuditoria> log = ArgumentCaptor.forClass(LogAuditoria.class);
+        verify(auditoria).save(log.capture());
+        assertEquals("ALTERACAO_PERFIL", log.getValue().getAcao());
+        assertEquals("Perfil alterado de Solicitante para Staff/Atendente. Sessões anteriores invalidadas.",
+                log.getValue().getDetalhesAlteracao());
     }
 
     @Test
@@ -382,38 +414,53 @@ class UsuarioControllerTest {
     }
 
     @Test
-    void solicitanteNaoPodeLerFotoDeOutroCadastro() {
+    void solicitantePodeLerFotoDeOutroCadastro() {
         Usuario solicitante = new Usuario();
         solicitante.setIdUsuario(9);
         solicitante.setIdPerfil(4);
-        Usuario alvo = new Usuario();
-        alvo.setIdUsuario(27);
-        alvo.setIdPerfil(4);
-        when(authentication.getName()).thenReturn("joana@example.org");
-        when(usuarios.findByEmailIgnoreCase("joana@example.org")).thenReturn(Optional.of(solicitante));
-        when(usuarios.findById(27)).thenReturn(Optional.of(alvo));
-
-        ResponseStatusException error = assertThrows(ResponseStatusException.class,
-                () -> controller.fotoCadastro(27, authentication, null));
-
-        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
-        verifyNoInteractions(fotos);
-    }
-
-    @Test
-    void equipePodeLerFotoDeCadastroComEtags() {
-        Usuario equipe = new Usuario();
-        equipe.setIdUsuario(1);
-        equipe.setIdPerfil(3);
-        Usuario alvo = new Usuario();
-        alvo.setIdUsuario(27);
-        alvo.setIdPerfil(4);
         UsuarioFoto foto = new UsuarioFoto();
         foto.setIdUsuario(27);
         foto.setConteudo(new byte[] { 1, 2, 3 });
+        when(authentication.getName()).thenReturn("joana@example.org");
+        when(usuarios.findByEmailIgnoreCase("joana@example.org")).thenReturn(Optional.of(solicitante));
+        when(fotos.findById(27)).thenReturn(Optional.of(foto));
+
+        var result = controller.fotoCadastro(27, authentication, null);
+
+        assertEquals(HttpStatus.OK, result.getStatusCode());
+        assertArrayEquals(new byte[] { 1, 2, 3 }, result.getBody());
+        verify(fotos).findById(27);
+    }
+
+    @Test
+    void equipePodeLerFotoDeOutraConta() {
+        Usuario equipe = new Usuario();
+        equipe.setIdUsuario(1);
+        equipe.setIdPerfil(3);
+        UsuarioFoto foto = new UsuarioFoto();
+        foto.setIdUsuario(27);
+        foto.setConteudo(new byte[] { 4, 5, 6 });
         when(authentication.getName()).thenReturn("staff@example.org");
         when(usuarios.findByEmailIgnoreCase("staff@example.org")).thenReturn(Optional.of(equipe));
-        when(usuarios.findById(27)).thenReturn(Optional.of(alvo));
+        when(fotos.findById(27)).thenReturn(Optional.of(foto));
+
+        var result = controller.fotoCadastro(27, authentication, null);
+
+        assertEquals(HttpStatus.OK, result.getStatusCode());
+        assertArrayEquals(new byte[] { 4, 5, 6 }, result.getBody());
+        verify(fotos).findById(27);
+    }
+
+    @Test
+    void usuarioPodeLerPropriaFotoComEtags() {
+        Usuario solicitante = new Usuario();
+        solicitante.setIdUsuario(27);
+        solicitante.setIdPerfil(4);
+        UsuarioFoto foto = new UsuarioFoto();
+        foto.setIdUsuario(27);
+        foto.setConteudo(new byte[] { 1, 2, 3 });
+        when(authentication.getName()).thenReturn("joana@example.org");
+        when(usuarios.findByEmailIgnoreCase("joana@example.org")).thenReturn(Optional.of(solicitante));
         when(fotos.findById(27)).thenReturn(Optional.of(foto));
 
         var first = controller.fotoCadastro(27, authentication, null);
@@ -422,5 +469,31 @@ class UsuarioControllerTest {
         assertEquals(HttpStatus.OK, first.getStatusCode());
         assertArrayEquals(new byte[] { 1, 2, 3 }, first.getBody());
         assertEquals(HttpStatus.NOT_MODIFIED, cached.getStatusCode());
+        verify(fotos, times(2)).findById(27);
+    }
+
+    @Test
+    void uploadDaFotoSalvaNoIdDoUsuarioAutenticado() throws IOException {
+        Usuario solicitante = new Usuario();
+        solicitante.setIdUsuario(27);
+        solicitante.setIdPerfil(4);
+        solicitante.setEmail("joana@example.org");
+        BufferedImage image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        assertTrue(ImageIO.write(image, "png", bytes));
+        MockMultipartFile upload = new MockMultipartFile("foto", "perfil.png", "image/png", bytes.toByteArray());
+        UsuarioFoto persistedPhoto = new UsuarioFoto();
+        when(authentication.getName()).thenReturn("joana@example.org");
+        when(usuarios.findByEmailIgnoreCase("joana@example.org")).thenReturn(Optional.of(solicitante));
+        when(usuarios.findByEmail("joana@example.org")).thenReturn(Optional.of(solicitante));
+        when(fotos.findById(27)).thenReturn(Optional.of(persistedPhoto));
+
+        var result = controller.atualizarMinhaFoto(upload, authentication);
+
+        assertEquals(HttpStatus.OK, result.getStatusCode());
+        verify(fotos).save(persistedPhoto);
+        assertEquals(27, persistedPhoto.getIdUsuario());
+        assertTrue(Objects.requireNonNull(result.getBody()).containsKey("temFoto"));
+        verify(fotos).findById(27);
     }
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
-import { Avatar } from './App.jsx'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { Avatar, BookingModal } from './App.jsx'
 
 const originalCreateObjectURL = URL.createObjectURL
 const originalRevokeObjectURL = URL.revokeObjectURL
@@ -76,5 +76,46 @@ describe('Avatar', () => {
     render(<Avatar user={{ idUsuario: 503, nomeCompleto: 'Ana Souza', temFoto: true, fotoVersao: 1 }} />)
 
     await waitFor(() => expect(screen.getByRole('img', { name: 'Avatar de Ana Souza' }).textContent).toBe('AS'))
+  })
+})
+
+describe('BookingModal', () => {
+  it('offers login or signup after an unauthenticated reservation and keeps the draft', async () => {
+    const onRequireAuthentication = vi.fn()
+    const close = vi.fn()
+    const form = {
+      dataReserva: '2026-11-01',
+      horarioInicio: '09:30',
+      horarioFim: '10:30',
+      tituloEvento: 'Oficina de teste',
+      descricaoFinalidade: 'Continuar após autenticar',
+      quantidadeParticipantes: '',
+    }
+    globalThis.fetch.mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({ error: 'Forbidden' }),
+    })
+
+    render(
+      <BookingModal
+        space={{ idEspaco: 12, nomeEspaco: 'Coworking', tipoEspaco: 'Coworking', capacidadePessoas: 20 }}
+        close={close}
+        onSaved={vi.fn()}
+        onRequireAuthentication={onRequireAuthentication}
+        initialDate={form.dataReserva}
+        initialTime={form.horarioInicio}
+        initialEndTime={form.horarioFim}
+        initialForm={form}
+      />,
+    )
+
+    fireEvent.submit(screen.getByRole('button', { name: /Continuar solicitação/ }).closest('form'))
+
+    expect(await screen.findByText(/A solicitação não foi enviada/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
+
+    expect(onRequireAuthentication).toHaveBeenCalledWith('signup', { spaceId: 12, form })
+    expect(close).not.toHaveBeenCalled()
   })
 })

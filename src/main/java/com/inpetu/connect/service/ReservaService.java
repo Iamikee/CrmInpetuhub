@@ -90,7 +90,7 @@ public class ReservaService {
         Reserva criada = reservas.save(reserva);
         registrar("reserva", criada.getIdReserva(), "CRIACAO",
                 "Reserva criada com status: " + criada.getStatusReserva(), solicitante.getIdUsuario(), solicitadaEm);
-        notificacoes.enviar(destinatarios(solicitante), "RESERVA_CRIADA", "Solicitação de reserva recebida",
+        notificacoes.enviar(List.of(solicitante), "RESERVA_CRIADA", "Solicitação de reserva recebida",
                 "Sua reserva \"" + criada.getTituloEvento() + "\" foi registrada como " + criada.getStatusReserva()
                         + ". O horário fica reservado pela ordem do pedido.");
         if (excedeCota) notificarExcedente(criada, solicitante, limiteMensal, horasPedido);

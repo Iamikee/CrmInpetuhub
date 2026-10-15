@@ -103,7 +103,7 @@ Após configurar as variáveis do Railway, valide em staging:
 
 1. **Cadastro/OTP:** solicite cadastro com e-mail de teste, abra `/verificar-email`, confirme o código recebido e confira que o login automático redireciona para o portal. Abra também `/confirmar?token=teste` diretamente: a aplicação React deve carregar, em vez da Whitelabel 404 (o token de teste será recusado). Teste código errado cinco vezes, expiração após 10 minutos, reenvio após 60 segundos e o limite de reenvios por e-mail/IP. Simule falha do Brevo e confira a mensagem de erro e a opção de reenviar.
 2. **Entrada e portal:** acesse uma página protegida antes do login e confirme que, após autenticar, volta apenas a uma rota interna permitida. Sem destino anterior, solicitantes devem ir ao portal e a equipe ao painel.
-3. **Perfil/foto:** altere nome, telefone, organização e vínculo; confirme que e-mail, perfil e persona são somente leitura. Envie JPG/PNG/WebP válido de até 2 MB, confira o avatar, remova a foto e valide a rejeição de tipo/conteúdo incompatível e arquivo grande.
+3. **Perfil/foto:** altere nome, telefone, organização e vínculo; confirme que e-mail, perfil e persona são somente leitura. Envie JPG/PNG/WebP válido de até 2 MB, confira o avatar, remova a foto e valide a rejeição de tipo/conteúdo incompatível e arquivo grande. Cada foto fica vinculada à conta autenticada que a enviou e pode ser visualizada por qualquer usuário autenticado.
 4. **Senha temporária:** como Coordenador, redefina a senha de um usuário permitido e copie a senha exibida uma única vez. Confirme que tokens anteriores são invalidados, que o login com senha temporária exige troca e que APIs ficam bloqueadas até a nova senha ser salva.
 5. **Persona e telas:** altere a persona em um cadastro de teste, valide a confirmação quando a cota muda e navegue pelo seletor com teclado. Confira ficha, modais e portal em largura móvel.
 6. **E-mails:** com perfil `dev` ativo, abra `/api/v1/dev/email-preview` para conferir os dois modelos. Em staging, confirme recebimento do código HTML e teste também a alternativa de texto do e-mail.
@@ -115,10 +115,12 @@ Execute a suíte automatizada do backend com `mvn test` e valide o frontend com 
 - **Público:** `GET /espacos`, `GET /espacos/{id}/agenda`, `POST /usuarios/cadastro-publico`, `POST /auth/login`, `POST /auth/logout`, `POST /duvidas`.
 - **Sessão:** `GET /auth/session` confirma a sessão autenticada pelo cookie HttpOnly. O corpo do login não devolve o JWT.
 - **Solicitante autenticado:** `POST /reservas`, `GET /reservas/minhas`, `DELETE /reservas/{id}/cancelar` e `GET /notificacoes/minhas`.
-- **Equipe:** consulta e aprovação de reservas, edição (`PUT /reservas/{id}`), registro de negociação de excedentes (`PATCH /reservas/{id}/negociacao`), gestão de espaços e organizações, atendimento, classificação P1–P6 (`GET /usuarios/personas` e `PUT /usuarios/{id}/persona`), edição de cadastro (`PUT /usuarios/{id}/cadastro`), desativação e auditoria.
+- **Equipe:** consulta e aprovação de reservas, edição (`PUT /reservas/{id}`), registro de negociação de excedentes (`PATCH /reservas/{id}/negociacao`), gestão de espaços e organizações, atendimento, classificação P1–P6 (`GET /usuarios/personas` e `PUT /usuarios/{id}/persona`), edição de cadastro (`PUT /usuarios/{id}/cadastro`), gestão de perfil de acesso (`PATCH /usuarios/{id}/perfil`, somente Coordenador), desativação e auditoria.
 - **Notificações:** marcação como lida com `PATCH /notificacoes/{id}/lida` ou `PATCH /notificacoes/lidas`, para usuários autenticados.
 
 Todas as rotas ficam sob `/api/v1`.
+
+Para dar acesso à equipe a uma pessoa que já criou uma conta, entre no painel com perfil Coordenador, abra **Equipe**, localize a conta e selecione **Adicionar à equipe**. Escolha Gestor de Espaços ou Staff/Atendente e salve. A pessoa precisará entrar novamente para que o novo perfil tenha efeito. O mesmo menu permite voltar o perfil para Solicitante e remover o acesso à equipe.
 
 ## Regras de negócio
 
