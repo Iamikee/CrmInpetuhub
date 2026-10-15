@@ -107,6 +107,7 @@ Após configurar as variáveis do Railway, valide em staging:
 4. **Senha temporária:** como Coordenador, redefina a senha de um usuário permitido e copie a senha exibida uma única vez. Confirme que tokens anteriores são invalidados, que o login com senha temporária exige troca e que APIs ficam bloqueadas até a nova senha ser salva.
 5. **Persona e telas:** altere a persona em um cadastro de teste, valide a confirmação quando a cota muda e navegue pelo seletor com teclado. Confira ficha, modais e portal em largura móvel.
 6. **E-mails:** com perfil `dev` ativo, abra `/api/v1/dev/email-preview` para conferir os dois modelos. Em staging, confirme recebimento do código HTML e teste também a alternativa de texto do e-mail.
+7. **Persistência dos espaços:** ative e desative um espaço pelo painel, confira a resposta do PATCH e atualize a lista; depois reinicie a API e confirme o mesmo estado. O bootstrap do catálogo atualiza os metadados sem redefinir o estado salvo. Se o estado mudar entre deploys, confirme que `DB_URL` aponta para o mesmo banco persistente antes e depois da reinicialização.
 
 Execute a suíte automatizada do backend com `mvn test` e valide o frontend com `npm run build`.
 

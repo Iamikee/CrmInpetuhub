@@ -715,7 +715,7 @@ function Home({ spaces, spacesLoaded, onConsultSpace, onSearchAvailability, onOp
       <div className="filter-row"><div className="filter-label"><SlidersHorizontal size={15} /> EXPLORE POR TIPO</div>{types.map(type => <button key={type} className={`filter-chip ${filter === type ? 'filter-chip-active' : ''}`} onClick={() => setFilter(type)}>{type}</button>)}</div>
       {!spacesLoaded && <p className="empty-inline" role="status">Carregando espaços...</p>}
       {spacesLoaded && spaces.length === 0 && <p className="empty-inline" role="status">Nenhum espaço cadastrado no momento.</p>}
-      <div className="space-grid">{filtered.map((space, index) => { const unavailable = space.ativo === false; const guidedTourSpace = isGuidedTour(space.tipoEspaco); return <article className={`space-card ${index === 0 ? 'space-card-featured' : ''} ${unavailable ? 'space-card-unavailable' : ''}`} key={space.idEspaco}><div className="space-image"><RoomPhoto space={space} alt={`Foto de ${space.nomeEspaco}`} /><button type="button" className="space-image-open" onClick={() => setGallerySpace(space)} aria-label={`Ver foto de ${space.nomeEspaco}`}>Ver foto <ArrowUpRight size={15} /></button>{unavailable ? <span className="space-unavailable-overlay">INDISPONÍVEL</span> : <span className="availability-dot"><i /> Disponível</span>}</div><div className="space-info"><div className="space-meta"><span>{space.tipoEspaco}</span><span><Users size={14} /> Até {space.capacidadePessoas || 20} pessoas</span></div><h3>{space.nomeEspaco}</h3><p>{unavailable ? <>{space.motivoIndisponibilidade || 'Este espaço está temporariamente indisponível.'}<small className="unavailable-deadline">{unavailableDeadlineLabel(space.dataPrevisaoRetorno)}</small></> : space.equipamentosDisponiveis || 'Um ambiente versátil para as suas ideias.'}</p><button className="space-cta" onClick={() => onConsultSpace(space)}>{unavailable ? 'Ver motivo' : guidedTourSpace ? 'Solicitar visita' : 'Ver Horários'}</button></div></article> })}</div>
+      <div className="space-grid">{filtered.map((space, index) => { const unavailable = space.ativo === false; const guidedTourSpace = isGuidedTour(space.tipoEspaco); return <article className={`space-card ${index === 0 ? 'space-card-featured' : ''} ${unavailable ? 'space-card-unavailable' : ''}`} key={space.idEspaco}><div className="space-image"><RoomPhoto space={space} alt={`Foto de ${space.nomeEspaco}`} /><button type="button" className="space-image-open" onClick={() => setGallerySpace(space)} aria-label={`Ver foto de ${space.nomeEspaco}`}>Ver foto <ArrowUpRight size={15} /></button>{unavailable ? <span className="space-unavailable-overlay">INDISPONÍVEL</span> : <span className="availability-dot"><i /> Disponível</span>}</div><div className="space-info"><div className="space-meta"><span>{space.tipoEspaco}</span><span><Users size={14} /> Até {space.capacidadePessoas || 20} pessoas</span></div><h3>{space.nomeEspaco}</h3><p>{unavailable ? <>{space.motivoIndisponibilidade || 'Este espaço está temporariamente indisponível.'}<small className="unavailable-deadline">{unavailableDeadlineLabel(space.dataPrevisaoRetorno)}</small></> : space.equipamentosDisponiveis || 'Um ambiente versátil para as suas ideias.'}</p><button type="button" className="space-cta" disabled={unavailable} onClick={() => onConsultSpace(space)}>{unavailable ? 'Indisponível' : guidedTourSpace ? 'Solicitar visita' : 'Ver Horários'}</button></div></article> })}</div>
     </section>
     {gallerySpace && <RoomGallery space={gallerySpace} onClose={() => setGallerySpace(null)} onConsultSpace={onConsultSpace} />}
     <section id="about" className="about-hub"><div className="about-copy"><div className="eyebrow">CIÊNCIA, TECNOLOGIA E CONEXÕES</div><h2>Sobre o <em>Hub</em></h2><p>O <strong>Centro de Inovação InPETU Hub</strong> está instalado no <strong>Lote 73 do Parque Tecnológico Sapiens Parque</strong>, em Canasvieiras, Florianópolis, conectando pesquisa, empreendedorismo e desenvolvimento tecnológico.</p><p>O Hub oferece infraestrutura compartilhada para capacitações, eventos, mentorias e visitas técnicas, com espaços que podem ser consultados e solicitados diretamente pelo InPETU Connect.</p><ul><li><Check size={15} /> Infraestrutura multimídia para encontros e capacitações</li><li><Check size={15} /> Agendamento digital e acompanhamento pela equipe</li><li><Check size={15} /> Atendimento dedicado e cuidado com seus dados</li></ul></div><aside className="ecosystem-cta"><span className="eyebrow">INPETU CONNECT</span><strong>Conheça os espaços</strong><p>Consulte o calendário e encontre um ambiente para sua próxima atividade.</p><Button icon={ArrowRight} onClick={onOpenCalendar}>Ver disponibilidade</Button></aside></section>
@@ -763,9 +763,10 @@ export function BookingModal({ space, close, onSaved, onRequireAuthentication, i
     </form>
   </Modal>
 }
-function AccessPage({ onLogin, onSignup }) {
+export function AccessPage({ onLogin, onSignup }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordVisible, setPasswordVisible] = useState(false)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   async function submit(event) {
@@ -782,7 +783,7 @@ function AccessPage({ onLogin, onSignup }) {
       <p className="account-description">Acesse para acompanhar e gerenciar suas solicitações. O painel da equipe é exibido conforme as permissões da sua conta.</p>
       <form className="form-stack account-form" onSubmit={submit}>
         <label>E-mail <span aria-hidden="true">*</span><input required type="email" autoComplete="email" placeholder="seu.email@empresa.com" value={email} onChange={e => setEmail(e.target.value)} /></label>
-        <label>Senha <span aria-hidden="true">*</span><input required type="password" autoComplete="current-password" placeholder="Sua senha" value={password} onChange={e => setPassword(e.target.value)} /></label>
+        <label>Senha <span aria-hidden="true">*</span><div className="login-password-wrap"><input required type={passwordVisible ? 'text' : 'password'} autoComplete="current-password" placeholder="Sua senha" value={password} onChange={e => setPassword(e.target.value)} /><button type="button" className="password-visibility" aria-label={`${passwordVisible ? 'Ocultar' : 'Mostrar'} senha`} aria-pressed={passwordVisible} onClick={() => setPasswordVisible(visible => !visible)}>{passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
         {notice && <p className="account-notice account-notice-error" role="alert">{notice}</p>}
         <Button type="submit" disabled={busy}>{busy ? 'Aguarde...' : 'Entrar com e-mail e senha'}</Button>
       </form>
@@ -820,7 +821,7 @@ function PasswordChangePage({ user, onLogout, onPasswordChanged }) {
     </section>
   </main>
 }
-function SignupPage({ onBack, onCodeSent }) {
+export function SignupPage({ onBack, onCodeSent }) {
   const [form, setForm] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '', confirmarSenha: '' })
   const [status, setStatus] = useState('')
   const [sendFailedEmail, setSendFailedEmail] = useState('')
@@ -829,8 +830,12 @@ function SignupPage({ onBack, onCodeSent }) {
     event.preventDefault()
     setStatus('')
     if (form.senha !== form.confirmarSenha) return setStatus('As senhas não coincidem.')
+    if (form.telefone && !isValidBrazilianMobile(formatBrazilianPhone(form.telefone))) {
+      return setStatus('Informe um celular no formato (48) 99999-9999.')
+    }
     try {
       const { confirmarSenha, ...cadastro } = form
+      cadastro.telefone = cadastro.telefone ? formatBrazilianPhone(cadastro.telefone) : ''
       await request('/usuarios/cadastro-publico', { method: 'POST', body: JSON.stringify(cadastro) })
       onCodeSent(form.email.trim().toLowerCase())
     } catch (error) {
@@ -1105,7 +1110,7 @@ function HelpPage() {
   async function submit(event) { event.preventDefault(); setStatus(''); if (file && (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024)) return setStatus('Anexe PDF, PNG ou JPG de até 10 MB.'); try { if (file) await uploadQuestion(form, file, setProgress); else await request('/duvidas', { method: 'POST', body: JSON.stringify(form) }); setProgress(100); setStatus('Mensagem enviada. A equipe InPETU responderá pelo e-mail informado.'); setForm({ emailContato: '', telefoneContato: '', mensagemDuvida: '' }); setFile(null) } catch (error) { setStatus(error.message); setProgress(0) } }
   return <main className="inner-page help-page"><div className="help-intro"><div className="eyebrow">ESTAMOS POR PERTO</div><h1>Vamos conversar<br /><em>sobre sua ideia?</em></h1><p>Tem dúvidas sobre os espaços, eventos ou quer descobrir como fazer parte do ecossistema? Escreva para a gente.</p><div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div><div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div></div><form className="help-form" onSubmit={submit}><div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>Retornamos em até dois dias úteis.</small></div></div><label>Seu e-mail<input required type="email" value={form.emailContato} onChange={e => setForm({ ...form, emailContato: e.target.value })} /></label><label>Telefone <span>(opcional)</span><PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm({ ...form, telefoneContato })} /></label><label>Sua mensagem<textarea required rows="5" maxLength="5000" value={form.mensagemDuvida} onChange={e => setForm({ ...form, mensagemDuvida: e.target.value })} placeholder="Como podemos ajudar?" /></label><label className="upload-box"><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><span className="upload-icon"><Plus size={19} /></span><span><strong>{file ? file.name : 'Adicionar anexo'}</strong><small>PDF, PNG ou JPG · até 10 MB</small></span><span className="upload-action">Escolher arquivo</span></label>{progress > 0 && <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>}{status && <p className={status.startsWith('Mensagem') ? 'success-note' : 'form-message'}>{status}</p>}<Button type="submit">Enviar mensagem <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Seus dados são protegidos pela política de privacidade UFSC.</p></form></main>
 }
-function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, initialKind, initialSpaceId, availabilityVersion }) {
+export function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, initialKind, initialSpaceId, availabilityVersion }) {
   const [date, setDate] = useState(initialDate)
   const [monthCursor, setMonthCursor] = useState(() => new Date(`${initialDate}T12:00:00`))
   const [monthCalendarOpen, setMonthCalendarOpen] = useState(false)
@@ -1121,6 +1126,7 @@ function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, initialKin
       left.nomeEspaco.localeCompare(right.nomeEspaco, 'pt-BR')
   })
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId || '')
+  const dateSectionRef = useRef(null)
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [nextSlotSelection, setNextSlotSelection] = useState('start')
@@ -1136,6 +1142,14 @@ function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, initialKin
     const suggestedSpace = spaces.find(space => space.tipoEspaco === initialKind && space.ativo !== false)
     if (suggestedSpace) setSelectedSpaceId(String(suggestedSpace.idEspaco))
   }, [initialKind, selectedSpaceId, spaces, spacesLoaded])
+  useEffect(() => {
+    if (!selectedSpace || !dateSectionRef.current) return
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    dateSectionRef.current.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    })
+  }, [selectedSpace?.idEspaco])
   useEffect(() => {
     setStartTime('')
     setEndTime('')
@@ -1278,7 +1292,7 @@ function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, initialKin
           </div>}
         </section>
 
-        <section className="booking-section" aria-labelledby="booking-date-title">
+        <section ref={dateSectionRef} className="booking-section booking-date-section" aria-labelledby="booking-date-title">
           <div className="booking-section-heading"><span className="booking-section-number">02</span><div><h2 id="booking-date-title">Escolha dia e horário</h2><p>Selecione uma data e um intervalo disponível.</p></div></div>
           <div className="booking-date-toolbar"><h3>Próximos 14 dias</h3><button type="button" className="booking-calendar-toggle" aria-expanded={monthCalendarOpen} aria-controls="booking-month-calendar" onClick={() => setMonthCalendarOpen(open => !open)}><CalendarDays size={15} /> {monthCalendarOpen ? 'Fechar calendário' : 'Abrir calendário'}</button></div>
           <div className="booking-date-rail" role="group" aria-label="Selecione um dos próximos 14 dias">
@@ -1905,12 +1919,13 @@ function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, set
       </form>
     </Modal></div>
 }
-function LoginInline({ onLogin }) {
+export function LoginInline({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordVisible, setPasswordVisible] = useState(false)
   const [error, setError] = useState('')
   async function submit(event) { event.preventDefault(); setError(''); try { const result = await request('/auth/login', { method: 'POST', body: JSON.stringify({ email, senha: password }) }); const normalized = { ...result, perfil: Number(result.perfil ?? result.idPerfil ?? 4) }; storeUser(normalized); onLogin(normalized) } catch (e) { setError(e.message) } }
-  return <form className="form-stack" onSubmit={submit}><label>E-mail corporativo<input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="nome@inpetuhub.ufsc.br" /></label><label>Senha<input required type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Sua senha" /></label>{error && <p className="form-message">{error}</p>}<Button type="submit">Acessar painel <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Acesso protegido por autenticação segura.</p></form>
+  return <form className="form-stack" onSubmit={submit}><label>E-mail corporativo<input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="nome@inpetuhub.ufsc.br" /></label><label>Senha<div className="login-password-wrap"><input required type={passwordVisible ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="Sua senha" /><button type="button" className="password-visibility" aria-label={`${passwordVisible ? 'Ocultar' : 'Mostrar'} senha`} aria-pressed={passwordVisible} onClick={() => setPasswordVisible(visible => !visible)}>{passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>{error && <p className="form-message" role="alert">{error}</p>}<Button type="submit">Acessar painel <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Acesso protegido por autenticação segura.</p></form>
 }
 function Kpi({ icon: Icon, label, value, change, accent }) { return <article className="kpi-card"><div className={`kpi-icon kpi-${accent}`}><Icon size={18} /></div><span className="kpi-label">{label}</span><strong className="kpi-value">{value}</strong><small>{change}</small><ArrowUpRight className="kpi-trend" size={16} /></article> }
 function CrmTitle({ eyebrow, title, description, action }) { return <div className="crm-title-row"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div> }
@@ -2153,7 +2168,6 @@ function AppInner({ onCodeSent, initialView = 'home' }) {
   function showSpaceAvailability(space) {
     setCalendarQuery({ date: localDateValue(), kind: space.tipoEspaco, spaceId: String(space.idEspaco) })
     setView('calendar')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   function openCalendar() {
     setCalendarQuery({ date: localDateValue(), kind: '', spaceId: '' })

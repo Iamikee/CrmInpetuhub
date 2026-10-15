@@ -600,6 +600,7 @@ body{background:var(--paper);color:#203530}
 .booking-main{min-width:0;display:grid;gap:16px}
 .booking-section,.booking-summary{min-width:0;border:1px solid #dfe7e1;border-radius:16px;background:#fff;box-shadow:0 5px 18px rgba(23,44,67,.045)}
 .booking-section{padding:20px}
+.booking-date-section{scroll-margin-top:1.5rem}
 .booking-section-heading{display:flex;align-items:flex-start;gap:11px;margin-bottom:17px}
 .booking-section-number{flex:none;color:#789087;font-size:10px;font-weight:800;letter-spacing:.6px;padding-top:3px}
 .booking-section-heading h2{margin:0 0 4px;color:#20362e;font:700 17px/1.25 Manrope,sans-serif}

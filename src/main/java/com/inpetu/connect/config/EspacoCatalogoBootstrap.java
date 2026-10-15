@@ -71,15 +71,6 @@ public class EspacoCatalogoBootstrap {
                 }
             }
 
-            for (Espaco antigo : existentes) {
-                if (nomeIgual(antigo.getNomeEspaco(), "Sala de Aula 1")
-                    || nomeIgual(antigo.getNomeEspaco(), "Visita Guiada")) {
-                    antigo.setAtivo(false);
-                    antigo.setMotivoIndisponibilidade("Fora do catálogo atual; histórico e reservas preservados.");
-                    antigo.setDataPrevisaoRetorno(null);
-                    espacos.save(antigo);
-                }
-            }
         };
     }
 
