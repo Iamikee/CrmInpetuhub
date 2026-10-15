@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions, Dialog, DialogPanel, DialogTitle, Menu, MenuButton, MenuItem, MenuItems, Tab, TabGroup, TabList, TabPanel, TabPanels, Transition, TransitionChild } from '@headlessui/react'
+import { Dialog, DialogPanel, DialogTitle, Menu, MenuButton, MenuItem, MenuItems, Tab, TabGroup, TabList, TabPanel, TabPanels, Transition, TransitionChild } from '@headlessui/react'
 import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, DoorOpen, Download, Eye, EyeOff, ExternalLink, FileText, Filter, GraduationCap, Home as HomeIcon, LayoutDashboard, ListChecks, LockKeyhole, Mail, MapPin, Menu as MenuIcon, MessageCircle, MoreHorizontal, Plus, Search, ShieldCheck, SlidersHorizontal, Users, X } from 'lucide-react'
 import { personas, personaQuotaLabel } from './personas.js'
 
@@ -8,6 +8,20 @@ const omitPersona = user => {
   if (!user) return user
   const { idPersona, persona, ...safeUser } = user
   return safeUser
+}
+async function saveProfile() {
+  if (!profileChanged || profileBusy) return
+  setProfileBusy(true)
+  setProfileFeedback('')
+  try {
+    const updated = await onRole(client, Number(profileValue))
+    setProfileValue(String(updated.idPerfil))
+    setProfileFeedback('Perfil de acesso atualizado. A pessoa deverá entrar novamente.')
+  } catch (profileError) {
+    setProfileFeedback(profileError.message)
+  } finally {
+    setProfileBusy(false)
+  }
 }
 const getStoredUser = () => {
   try { return omitPersona(JSON.parse(localStorage.getItem('inpetu-user') || 'null')) } catch { return null }
@@ -271,7 +285,7 @@ function NotificationCenter({ user }) {
     refresh()
     const timer = window.setInterval(refresh, 30000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [user])
+  }, [user?.idUsuario])
   async function markRead(item) {
     if (item.lida) return
     try {
@@ -794,6 +808,7 @@ export function AccessPage({ onLogin, onSignup }) {
 }
 function PasswordChangePage({ user, onLogout, onPasswordChanged }) {
   const [form, setForm] = useState({ senhaAtual: '', novaSenha: '', confirmarSenha: '' })
+  const [visiblePasswords, setVisiblePasswords] = useState({})
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   async function submit(event) {
@@ -811,9 +826,11 @@ function PasswordChangePage({ user, onLogout, onPasswordChanged }) {
     <section className="account-card">
       <p className="account-description">Olá, {user?.nome?.split(' ')[0] || 'usuário'}. Escolha uma senha nova para continuar usando o InPETU Connect.</p>
       <form className="form-stack account-form" onSubmit={submit}>
-        <label>Senha temporária<input required type="password" autoComplete="current-password" value={form.senhaAtual} onChange={event => setForm({ ...form, senhaAtual: event.target.value })} /></label>
-        <label>Nova senha<input required minLength="8" maxLength="64" type="password" autoComplete="new-password" value={form.novaSenha} onChange={event => setForm({ ...form, novaSenha: event.target.value })} /></label>
-        <label>Confirmar nova senha<input required minLength="8" maxLength="64" type="password" autoComplete="new-password" value={form.confirmarSenha} onChange={event => setForm({ ...form, confirmarSenha: event.target.value })} /></label>
+        {[
+          ['senhaAtual', 'Senha temporária', 'current-password'],
+          ['novaSenha', 'Nova senha', 'new-password'],
+          ['confirmarSenha', 'Confirmar nova senha', 'new-password'],
+        ].map(([field, label, autoComplete]) => <label key={field}>{label}<div className="login-password-wrap"><input required minLength={field === 'senhaAtual' ? undefined : 8} maxLength={field === 'senhaAtual' ? undefined : 64} type={visiblePasswords[field] ? 'text' : 'password'} autoComplete={autoComplete} value={form[field]} onChange={event => setForm({ ...form, [field]: event.target.value })} /><button type="button" className="password-visibility" aria-label={`${visiblePasswords[field] ? 'Ocultar' : 'Mostrar'} ${label.toLowerCase()}`} aria-pressed={Boolean(visiblePasswords[field])} onClick={() => setVisiblePasswords(current => ({ ...current, [field]: !current[field] }))}>{visiblePasswords[field] ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>)}
         {error && <p className="account-notice account-notice-error" role="alert">{error}</p>}
         <Button type="submit" disabled={busy}>{busy ? 'Salvando...' : 'Salvar nova senha'}</Button>
       </form>
@@ -823,12 +840,14 @@ function PasswordChangePage({ user, onLogout, onPasswordChanged }) {
 }
 export function SignupPage({ onBack, onCodeSent }) {
   const [form, setForm] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '', confirmarSenha: '' })
+  const [visiblePasswords, setVisiblePasswords] = useState({})
   const [status, setStatus] = useState('')
   const [sendFailedEmail, setSendFailedEmail] = useState('')
   const [resending, setResending] = useState(false)
   async function submit(event) {
     event.preventDefault()
     setStatus('')
+    if (form.nomeCompleto.trim().split(/\s+/).length < 2) return setStatus('Informe nome e sobrenome.')
     if (form.senha !== form.confirmarSenha) return setStatus('As senhas não coincidem.')
     if (form.telefone && !isValidBrazilianMobile(formatBrazilianPhone(form.telefone))) {
       return setStatus('Informe um celular no formato (48) 99999-9999.')
@@ -864,13 +883,13 @@ export function SignupPage({ onBack, onCodeSent }) {
     <section className="account-card account-card-signup">
       <p className="account-description">Preencha seus dados. A classificação da organização é feita pela equipe InPETU.</p>
       <form className="form-stack account-form" onSubmit={submit}>
-        <label>Nome completo <span aria-hidden="true">*</span><input required autoComplete="name" value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: e.target.value })} /></label>
+        <label>Nome completo e sobrenome <span aria-hidden="true">*</span><input required autoComplete="name" value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: e.target.value })} /></label>
         <label>E-mail <span aria-hidden="true">*</span><input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
         <label>Telefone<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} /></label>
         <label>Organização <span aria-hidden="true">*</span><input required value={form.organizacao} onChange={e => setForm({ ...form, organizacao: e.target.value })} /></label>
         <label>Cargo ou vínculo <span aria-hidden="true">*</span><input required value={form.cargoVinculo} onChange={e => setForm({ ...form, cargoVinculo: e.target.value })} /></label>
-        <label>Senha <span aria-hidden="true">*</span><input required minLength={8} maxLength={64} type="password" autoComplete="new-password" value={form.senha} onChange={e => setForm({ ...form, senha: e.target.value })} /></label>
-        <label>Confirmar senha <span aria-hidden="true">*</span><input required minLength={8} maxLength={64} type="password" autoComplete="new-password" value={form.confirmarSenha} onChange={e => setForm({ ...form, confirmarSenha: e.target.value })} /></label>
+        <label>Senha <span aria-hidden="true">*</span><div className="login-password-wrap"><input required minLength={8} maxLength={64} type={visiblePasswords.senha ? 'text' : 'password'} autoComplete="new-password" value={form.senha} onChange={e => setForm({ ...form, senha: e.target.value })} /><button type="button" className="password-visibility" aria-label={`${visiblePasswords.senha ? 'Ocultar' : 'Mostrar'} senha`} aria-pressed={Boolean(visiblePasswords.senha)} onClick={() => setVisiblePasswords(current => ({ ...current, senha: !current.senha }))}>{visiblePasswords.senha ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
+        <label>Confirmar senha <span aria-hidden="true">*</span><div className="login-password-wrap"><input required minLength={8} maxLength={64} type={visiblePasswords.confirmarSenha ? 'text' : 'password'} autoComplete="new-password" value={form.confirmarSenha} onChange={e => setForm({ ...form, confirmarSenha: e.target.value })} /><button type="button" className="password-visibility" aria-label={`${visiblePasswords.confirmarSenha ? 'Ocultar' : 'Mostrar'} confirmação da senha`} aria-pressed={Boolean(visiblePasswords.confirmarSenha)} onClick={() => setVisiblePasswords(current => ({ ...current, confirmarSenha: !current.confirmarSenha }))}>{visiblePasswords.confirmarSenha ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
         {status && <p className="account-notice account-notice-error" role="alert">{status}</p>}
         {sendFailedEmail && <button className="button button-primary" type="button" disabled={resending} onClick={resendAfterSendFailure}>{resending ? 'Reenviando...' : 'Reenviar código'}</button>}
         <Button type="submit">Criar conta <ArrowRight size={16} /></Button>
@@ -1110,7 +1129,7 @@ function HelpPage() {
   async function submit(event) { event.preventDefault(); setStatus(''); if (file && (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024)) return setStatus('Anexe PDF, PNG ou JPG de até 10 MB.'); try { if (file) await uploadQuestion(form, file, setProgress); else await request('/duvidas', { method: 'POST', body: JSON.stringify(form) }); setProgress(100); setStatus('Mensagem enviada. A equipe InPETU responderá pelo e-mail informado.'); setForm({ emailContato: '', telefoneContato: '', mensagemDuvida: '' }); setFile(null) } catch (error) { setStatus(error.message); setProgress(0) } }
   return <main className="inner-page help-page"><div className="help-intro"><div className="eyebrow">ESTAMOS POR PERTO</div><h1>Vamos conversar<br /><em>sobre sua ideia?</em></h1><p>Tem dúvidas sobre os espaços, eventos ou quer descobrir como fazer parte do ecossistema? Escreva para a gente.</p><div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div><div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div></div><form className="help-form" onSubmit={submit}><div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>Retornamos em até dois dias úteis.</small></div></div><label>Seu e-mail<input required type="email" value={form.emailContato} onChange={e => setForm({ ...form, emailContato: e.target.value })} /></label><label>Telefone <span>(opcional)</span><PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm({ ...form, telefoneContato })} /></label><label>Sua mensagem<textarea required rows="5" maxLength="5000" value={form.mensagemDuvida} onChange={e => setForm({ ...form, mensagemDuvida: e.target.value })} placeholder="Como podemos ajudar?" /></label><label className="upload-box"><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><span className="upload-icon"><Plus size={19} /></span><span><strong>{file ? file.name : 'Adicionar anexo'}</strong><small>PDF, PNG ou JPG · até 10 MB</small></span><span className="upload-action">Escolher arquivo</span></label>{progress > 0 && <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>}{status && <p className={status.startsWith('Mensagem') ? 'success-note' : 'form-message'}>{status}</p>}<Button type="submit">Enviar mensagem <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Seus dados são protegidos pela política de privacidade UFSC.</p></form></main>
 }
-export function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, initialKind, initialSpaceId, availabilityVersion }) {
+export function CalendarPage({ spaces, spacesLoaded, onReserve, onBack, initialDate, initialKind, initialSpaceId, availabilityVersion }) {
   const [date, setDate] = useState(initialDate)
   const [monthCursor, setMonthCursor] = useState(() => new Date(`${initialDate}T12:00:00`))
   const [monthCalendarOpen, setMonthCalendarOpen] = useState(false)
@@ -1260,6 +1279,7 @@ export function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, ini
   }
   return <main className="inner-page catalog-page booking-page">
     <header className="catalog-heading booking-heading">
+      {onBack && <button type="button" className="booking-back-button" onClick={onBack}><ArrowLeft size={16} /> Voltar</button>}
       <span className="booking-eyebrow">INPETU CONNECT · LOTE 73</span>
       <h1>Agende um espaço</h1>
       <p>Escolha o ambiente, defina o dia e horário e envie sua solicitação.</p>
@@ -1358,6 +1378,7 @@ function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, set
   const [partners, setPartners] = useState([])
   const [clientUsers, setClientUsers] = useState([])
   const [clientProfile, setClientProfile] = useState(null)
+  const [approvingReservations, setApprovingReservations] = useState([])
   const [registrationCreateOpen, setRegistrationCreateOpen] = useState(false)
   const [registrationCreateBusy, setRegistrationCreateBusy] = useState(false)
   const [registrationCreateError, setRegistrationCreateError] = useState('')
@@ -1390,9 +1411,6 @@ function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, set
   const [spaceCreateBusy, setSpaceCreateBusy] = useState(false)
   const [spaceCreateError, setSpaceCreateError] = useState('')
   const [managedUsers, setManagedUsers] = useState([])
-  const [roleTarget, setRoleTarget] = useState(null)
-  const [roleSaveBusy, setRoleSaveBusy] = useState(false)
-  const [roleSaveError, setRoleSaveError] = useState('')
   const [partnerScope, setPartnerScope] = useState('all')
   const [reservationFiltersOpen, setReservationFiltersOpen] = useState(false)
   const [reservationStatusFilter, setReservationStatusFilter] = useState('Todas')
@@ -1449,14 +1467,19 @@ function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, set
     onReturnHome()
   }
   async function approve(item) {
+    if (approvingReservations.includes(item.idReserva)) return
     if (item.excedeCota && !item.dataNegociacao) {
       setNegotiationTarget(item)
       setNegotiationNote('')
       setNegotiationError('')
       return
     }
+    setApprovingReservations(current => [...current, item.idReserva])
     try {
       const updated = await request(`/reservas/${item.idReserva}/aprovar`, { method: 'POST' })
+      if (updated.statusReserva !== 'Confirmada') {
+        throw new Error('A solicitação foi enviada, mas não recebemos a confirmação da aprovação. Atualize a lista antes de tentar novamente.')
+      }
       setReservations(items => items.map(reservation => reservation.idReserva === item.idReserva ? { ...reservation, ...updated } : reservation))
       setAuditItems(items => [{
         time: new Date(updated.dataAprovacao || new Date()).toLocaleString('pt-BR'),
@@ -1468,6 +1491,8 @@ function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, set
       notify('Reserva aprovada e solicitante atualizado.')
     } catch (error) {
       notify(error.message)
+    } finally {
+      setApprovingReservations(current => current.filter(id => id !== item.idReserva))
     }
   }
     function editReservation(item) {
@@ -1766,20 +1791,27 @@ function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, set
       setSpaceStatusBusy(false)
     }
   }
-  async function saveRole() {
-    if (!roleTarget) return
-    setRoleSaveBusy(true)
-    setRoleSaveError('')
-    try {
-      const updated = await request(`/usuarios/${roleTarget.idUsuario}/perfil`, { method: 'PATCH', body: JSON.stringify({ idPerfil: Number(roleTarget.idPerfil) }) })
-      setManagedUsers(items => items.map(person => person.idUsuario === updated.idUsuario ? updated : person))
-      notify(Number(updated.idPerfil) === 4 ? 'Acesso à equipe removido. A pessoa precisará entrar novamente.' : 'Permissões da equipe atualizadas. A pessoa precisará entrar novamente.')
-      setRoleTarget(null)
-    } catch (error) {
-      setRoleSaveError(error.message)
-    } finally {
-      setRoleSaveBusy(false)
+  async function saveRole(target, idPerfil) {
+    const updated = await request(`/usuarios/${target.idUsuario}/perfil`, {
+      method: 'PATCH',
+      body: JSON.stringify({ idPerfil }),
+    })
+    setManagedUsers(items => items.map(person => person.idUsuario === updated.idUsuario ? updated : person))
+    setClientUsers(items => items.map(person => person.idUsuario === updated.idUsuario ? { ...person, ...updated } : person))
+    setClientProfile(current => current?.idUsuario === updated.idUsuario ? { ...current, ...updated } : current)
+    notify(Number(updated.idPerfil) === 4
+      ? 'Acesso à equipe removido. A pessoa precisará entrar novamente.'
+      : 'Permissões da equipe atualizadas. A pessoa precisará entrar novamente.')
+    return updated
+  }
+  function openUserFicha(person) {
+    const client = clientUsers.find(item => item.idUsuario === person.idUsuario)
+    if (!client) {
+      notify('A ficha deste usuário não está disponível.')
+      return
     }
+    setSection('Cadastros')
+    setClientProfile(client)
   }
   function exportPartners() {
     const rows = [['Organização', 'Responsável', 'E-mail']]
@@ -1859,7 +1891,7 @@ function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, set
         {section === 'Atendimento' && <><CrmTitle eyebrow="CENTRAL DE ATENDIMENTO" title="Dúvidas e mensagens" description="Acompanhe os contatos recebidos pelo portal público." /><div className="support-grid"><div className="crm-panel support-list"><div className="panel-heading"><div><div className="eyebrow">CAIXA DE ENTRADA</div><h2>{pendingQuestions.length} {pendingQuestions.length === 1 ? 'conversa aberta' : 'conversas abertas'}</h2></div><label className="ticket-filter">Status<select aria-label="Filtrar conversas por status" value={ticketStatusFilter} onChange={event => setTicketStatusFilter(event.target.value)}><option>Todas</option><option>Abertas</option><option>Respondidas</option></select></label></div>{filteredTickets.length ? filteredTickets.slice().sort((left, right) => new Date(right.dataEnvio).getTime() - new Date(left.dataEnvio).getTime()).map(ticket => <button className={`ticket-row ${selectedTicket?.idDuvida === ticket.idDuvida ? 'ticket-selected' : ''}`} key={ticket.idDuvida} onClick={() => setSelectedTicket(ticket)}><Avatar user={clientUsers.find(person => person.email?.toLowerCase() === ticket.emailContato?.toLowerCase())} nome={ticket.emailContato.split('@')[0].split(/[._-]/).join(' ')} tamanho={36} className="ticket-avatar" /><span><strong>{ticket.emailContato}</strong><small>{ticket.mensagemDuvida}</small><em>{new Date(ticket.dataEnvio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</em></span></button>) : <div className="empty-state"><MessageCircle size={24} /><p>Nenhuma conversa recebida.</p></div>}</div><div className="crm-panel ticket-detail">{selectedTicket ? <><div className="ticket-detail-head"><div><span className={`status-pill ${selectedTicket.statusAtendimento === 'Respondida' ? 'status-confirmed' : 'status-pending'}`}><i />{selectedTicket.statusAtendimento}</span><small>{new Date(selectedTicket.dataEnvio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</small></div>{selectedTicket.caminhoAnexo && <a className="table-action" href={`${API}/duvidas/${selectedTicket.idDuvida}/anexo`} target="_blank" rel="noreferrer"><Download size={15} /> Anexo</a>}</div><h2>{selectedTicket.emailContato}</h2><p>{selectedTicket.mensagemDuvida}</p>{selectedTicket.telefoneContato && <div className="ticket-sender"><Avatar user={clientUsers.find(person => person.email?.toLowerCase() === selectedTicket.emailContato?.toLowerCase())} nome={selectedTicket.emailContato.split('@')[0].split(/[._-]/).join(' ')} tamanho={36} className="ticket-avatar" /><span><strong>Telefone para retorno</strong><small>{selectedTicket.telefoneContato}</small></span></div>}<label>Sua resposta<textarea rows="5" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Escreva uma resposta para enviar por e-mail..." /></label><Button disabled={!answer.trim()} onClick={sendAnswer}><Mail size={16} /> Enviar resposta por e-mail</Button></> : <div className="empty-state"><MessageCircle size={24} /><p>Nenhuma dúvida recebida.</p></div>}</div></div></>
         }
         {section === 'Auditoria' && <><CrmTitle eyebrow="TRANSPARÊNCIA E CONTROLE" title="Histórico de ações" description="Acompanhe quem fez cada alteração, quando aconteceu e qual registro foi afetado." /><div className="crm-panel audit-panel"><div className="audit-toolbar"><label className="audit-search"><Search size={17} /><input type="search" value={auditQuery} onChange={event => setAuditQuery(event.target.value)} placeholder="Buscar por responsável, ação ou registro" aria-label="Buscar no histórico de auditoria" /></label><label className="audit-filter-label">Ação<select value={auditActionFilter} onChange={event => setAuditActionFilter(event.target.value)} aria-label="Filtrar por ação"><option>Todas</option>{auditActions.map(action => <option key={action}>{action}</option>)}</select></label><span className="audit-result-count">{filteredAuditItems.length} {filteredAuditItems.length === 1 ? 'registro' : 'registros'}</span></div><div className="audit-table-wrap"><table className="data-table audit-table"><thead><tr><th>Data e hora</th><th>Responsável</th><th>Ação</th><th>Registro afetado</th><th>Detalhes</th></tr></thead><tbody>{filteredAuditItems.map((item, i) => <tr key={`${item.time}-${item.user}-${i}`}><td><span className="audit-time">{item.time}</span></td><td><strong className="audit-actor">{item.user}</strong></td><td><span className="audit-action"><i />{item.action}</span></td><td><strong className="audit-target">{item.target}</strong></td><td className="audit-detail">{item.detail}</td></tr>)}</tbody></table>{filteredAuditItems.length === 0 && <div className="audit-empty"><ListChecks size={22} /><strong>{auditItems.length ? 'Nenhum registro encontrado' : 'Ainda não há ações registradas'}</strong><span>{auditItems.length ? 'Tente ajustar a busca ou o filtro selecionado.' : 'As alterações realizadas pela equipe aparecerão aqui.'}</span></div>}</div></div></>}
-        {section === 'Equipe' && user.perfil === 1 && <><CrmTitle eyebrow="ACESSO RESTRITO · COORDENADOR" title="Equipe e permissões" description="Encontre uma conta já cadastrada e atribua um perfil interno para liberar o painel." /><div className="crm-panel"><table className="data-table"><thead><tr><th>Conta</th><th>E-mail</th><th>Perfil</th><th>Status</th><th /></tr></thead><tbody>{managedUsers.map(person => { const isCurrentUser = person.email?.toLowerCase() === user.email?.toLowerCase(); return <tr key={person.idUsuario}><td><div className="team-person-cell"><Avatar user={person} tamanho={34} /><span><strong>{person.nomeCompleto}</strong><small>{person.cargoVinculo}</small></span></div></td><td>{person.email}</td><td>{['', 'Coordenador', 'Gestor de Espaços', 'Staff/Atendente', 'Solicitante'][person.idPerfil]}</td><td><span className={`status-pill ${person.ativo ? 'status-confirmed' : 'status-cancelled'}`}><i />{person.ativo ? 'Ativo' : 'Inativo'}</span></td><td>{isCurrentUser ? <span className="table-action-disabled" title="Você não pode alterar seu próprio perfil">Seu perfil</span> : <button className="table-action" onClick={() => setRoleTarget({ ...person })}>{person.idPerfil === 4 ? 'Adicionar à equipe' : 'Gerenciar papel'}</button>}</td></tr> })}</tbody></table></div></>}
+        {section === 'Equipe' && user.perfil === 1 && <><CrmTitle eyebrow="ACESSO RESTRITO · COORDENADOR" title="Equipe e permissões" description="Consulte as contas e gerencie o acesso da equipe dentro da ficha de cada solicitante." /><div className="crm-panel"><table className="data-table"><thead><tr><th>Conta</th><th>E-mail</th><th>Perfil</th><th>Status</th><th /></tr></thead><tbody>{managedUsers.map(person => { const isCurrentUser = person.email?.toLowerCase() === user.email?.toLowerCase(); return <tr key={person.idUsuario}><td><div className="team-person-cell"><Avatar user={person} tamanho={34} /><span><strong>{person.nomeCompleto}</strong><small>{person.cargoVinculo}</small></span></div></td><td>{person.email}</td><td>{['', 'Coordenador', 'Gestor de Espaços', 'Staff/Atendente', 'Solicitante'][person.idPerfil]}</td><td><span className={`status-pill ${person.ativo ? 'status-confirmed' : 'status-cancelled'}`}><i />{person.ativo ? 'Ativo' : 'Inativo'}</span></td><td>{isCurrentUser ? <span className="table-action-disabled" title="Você não pode alterar seu próprio perfil">Seu perfil</span> : <button type="button" className="table-action" onClick={() => openUserFicha(person)}>Abrir ficha</button>}</td></tr> })}</tbody></table></div></>}
       </div></main>{toast && <div className="toast"><Check size={17} />{toast}</div>}
     <Modal open={Boolean(reservationCancelTarget)} close={() => { if (!reservationCancelBusy) { setReservationCancelTarget(null); setReservationCancelError('') } }} title="Cancelar reserva">
       <div className="cancel-summary"><span>RESERVA #{reservationCancelTarget?.idReserva}</span><strong>{reservationCancelTarget?.tituloEvento}</strong><small>{reservationCancelTarget?.dataReserva} · {reservationCancelTarget?.horarioInicio}–{reservationCancelTarget?.horarioFim}</small></div>
@@ -1887,13 +1919,12 @@ function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, set
       {negotiationError && <p className="form-message" role="alert">{negotiationError}</p>}
       <Button disabled={!negotiationNote.trim() || negotiationBusy} onClick={recordNegotiationAndApprove}>{negotiationBusy ? 'Registrando...' : 'Registrar negociação e aprovar'} <Check size={16} /></Button>
     </Modal>
-    <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
-    <Modal open={Boolean(roleTarget)} close={() => { if (!roleSaveBusy) { setRoleTarget(null); setRoleSaveError('') } }} title={roleTarget?.idPerfil === 4 ? 'Adicionar à equipe' : 'Gerenciar papel'}>{roleTarget && <><div className="classify-org"><Avatar user={roleTarget} tamanho={40} className="org-avatar" /><span><strong>{roleTarget.nomeCompleto}</strong><small>{roleTarget.email}</small></span></div><label className="role-select-label">Perfil de acesso<select value={roleTarget.idPerfil} onChange={event => { setRoleTarget({ ...roleTarget, idPerfil: Number(event.target.value) }); setRoleSaveError('') }}><option value="1">Coordenador</option><option value="2">Gestor de Espaços</option><option value="3">Staff / Atendente</option><option value="4">Solicitante (sem acesso à equipe)</option></select></label><p className="access-intro">Ao salvar, as sessões atuais serão encerradas. A pessoa deverá entrar novamente para usar o perfil atualizado.</p>{roleSaveError && <p className="form-message" role="alert">{roleSaveError}</p>}<Button disabled={roleSaveBusy || Number(roleTarget.idPerfil) === managedUsers.find(person => person.idUsuario === roleTarget.idUsuario)?.idPerfil} onClick={saveRole}>{roleSaveBusy ? 'Salvando...' : 'Salvar papel'} <Check size={16} /></Button></>}</Modal>
+    <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onRole={saveRole} canManageRole={user.perfil === 1} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
     <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError('') } }} title="Criar cadastro para uma organização">
       <form className="form-stack" onSubmit={createRegistration}>
         <p className="access-intro">Cadastre a organização e uma pessoa responsável. A pessoa entrará usando e-mail e senha.</p>
         <label>Nome da organização<input required maxLength={100} value={newRegistration.organizacao} onChange={event => setNewRegistration({ ...newRegistration, organizacao: event.target.value })} /></label>
-        <label>Nome do responsável<input required maxLength={100} value={newRegistration.nomeCompleto} onChange={event => setNewRegistration({ ...newRegistration, nomeCompleto: event.target.value })} /></label>
+        <label>Nome e sobrenome do responsável<input required maxLength={100} value={newRegistration.nomeCompleto} onChange={event => setNewRegistration({ ...newRegistration, nomeCompleto: event.target.value })} /></label>
         <label>E-mail<input required type="email" maxLength={100} value={newRegistration.email} onChange={event => setNewRegistration({ ...newRegistration, email: event.target.value })} /></label>
         <div className="form-row">
           <label>Telefone (opcional)<PhoneInput value={newRegistration.telefone} onChange={telefone => setNewRegistration({ ...newRegistration, telefone })} /></label>
@@ -1929,33 +1960,22 @@ export function LoginInline({ onLogin }) {
 }
 function Kpi({ icon: Icon, label, value, change, accent }) { return <article className="kpi-card"><div className={`kpi-icon kpi-${accent}`}><Icon size={18} /></div><span className="kpi-label">{label}</span><strong className="kpi-value">{value}</strong><small>{change}</small><ArrowUpRight className="kpi-trend" size={16} /></article> }
 function CrmTitle({ eyebrow, title, description, action }) { return <div className="crm-title-row"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div> }
-function PersonaCombobox({ value, onChange }) {
-  const [query, setQuery] = useState('')
-  const options = Object.entries(personas).filter(([id, persona]) =>
-    `p${id} ${persona.label} ${personaQuotaLabel(persona)}`.toLocaleLowerCase('pt-BR')
-      .includes(query.trim().toLocaleLowerCase('pt-BR')))
-  return <Combobox value={value ? Number(value) : null} onChange={selected => { onChange(String(selected)); setQuery('') }}>
-    <div className="persona-combobox">
-      <ComboboxInput
-        aria-label="Classificação por persona"
-        className="persona-combobox-input"
-        displayValue={id => id ? `P${id} · ${personas[Number(id)]?.label || ''}` : ''}
-        onChange={event => setQuery(event.target.value)}
-        placeholder="Selecione P1–P6"
-      />
-      <ChevronDown size={16} aria-hidden="true" />
-      <ComboboxOptions className="persona-combobox-options">
-        {options.map(([id, persona]) => <ComboboxOption key={id} value={Number(id)} className={({ focus, selected }) => `persona-combobox-option ${focus ? 'persona-option-focus' : ''} ${selected ? 'persona-option-selected' : ''}`}>
-          <span className={`persona-code-badge ${persona.badge}`}>P{id}</span>
-          <span className="persona-option-copy"><strong>{persona.label}</strong><small>{personaQuotaLabel(persona)}</small></span>
-          <Check size={16} aria-hidden="true" />
-        </ComboboxOption>)}
-        {!options.length && <p className="persona-combobox-empty">Nenhuma persona encontrada.</p>}
-      </ComboboxOptions>
-    </div>
-  </Combobox>
+export function PersonaCombobox({ value, onChange }) {
+  return <div className="persona-combobox">
+    <select
+      aria-label="Classificação por persona"
+      className="persona-combobox-select"
+      value={value || ''}
+      onChange={event => onChange(event.target.value)}
+    >
+      <option value="" disabled>Selecione P1–P6</option>
+      {Object.entries(personas).map(([id, persona]) =>
+        <option key={id} value={id}>P{id} · {persona.label} — {personaQuotaLabel(persona)}</option>)}
+    </select>
+    <ChevronDown size={16} aria-hidden="true" />
+  </div>
 }
-function ClientProfileDialog({ client, reservations, tickets, auditItems, close, onSave, onPersona, onDeactivate, canDeactivate, canResetPassword, onResetPassword }) {
+function ClientProfileDialog({ client, reservations, tickets, auditItems, close, onSave, onPersona, onRole, canManageRole, onDeactivate, canDeactivate, canResetPassword, onResetPassword }) {
   const [tab, setTab] = useState('Dados gerais')
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({
@@ -1970,6 +1990,9 @@ function ClientProfileDialog({ client, reservations, tickets, auditItems, close,
   const [personaValue, setPersonaValue] = useState(client?.idPersona ? String(client.idPersona) : '')
   const [personaBusy, setPersonaBusy] = useState(false)
   const [personaFeedback, setPersonaFeedback] = useState('')
+  const [profileValue, setProfileValue] = useState(String(client?.idPerfil || 4))
+  const [profileBusy, setProfileBusy] = useState(false)
+  const [profileFeedback, setProfileFeedback] = useState('')
   const [deactivationOpen, setDeactivationOpen] = useState(false)
   const [deactivationReason, setDeactivationReason] = useState('')
   const [deactivationBusy, setDeactivationBusy] = useState(false)
@@ -1988,6 +2011,7 @@ function ClientProfileDialog({ client, reservations, tickets, auditItems, close,
   const clientAudit = auditItems.filter(item => item.target.includes(`#${client.idUsuario}`))
   const hours = monthlyQuotaUsed(reservations, client.idUsuario)
   const personaChanged = Boolean(personaValue) && Number(personaValue) !== Number(client.idPersona || 0)
+  const profileChanged = Number(profileValue) !== Number(client.idPerfil)
   const fields = [
     ['E-mail', form.email || '—'],
     ['Telefone / WhatsApp', form.telefone || 'Não informado'],
@@ -2065,6 +2089,11 @@ function ClientProfileDialog({ client, reservations, tickets, auditItems, close,
     </div>
     <div className="client-profile-content">
       {tab === 'Dados gerais' && <>
+        {canManageRole && <section className="client-persona-callout client-role-callout">
+          <div><strong><ShieldCheck size={16} /> Acesso ao sistema</strong><span>{['', 'Coordenador', 'Gestor de Espaços', 'Staff / Atendente', 'Solicitante'][client.idPerfil]}</span><small>Defina se esta conta terá acesso ao painel da equipe.</small></div>
+          <div className="client-persona-edit"><label>Perfil de acesso<select aria-label="Perfil de acesso na ficha" className="persona-combobox-select" value={profileValue} onChange={event => { setProfileValue(event.target.value); setProfileFeedback('') }}><option value="1">Coordenador</option><option value="2">Gestor de Espaços</option><option value="3">Staff / Atendente</option><option value="4">Solicitante</option></select></label><button type="button" className={`client-profile-action ${profileChanged ? 'persona-save-active' : ''}`} disabled={!profileChanged || profileBusy} onClick={saveProfile}>{profileBusy ? 'Salvando...' : 'Salvar perfil'}</button>{profileFeedback && <p className={profileFeedback.includes('atualizado') ? 'success-note' : 'form-message'} role="status">{profileFeedback}</p>}</div>
+          <small className="client-profile-private-note">Disponível somente para coordenadores.</small>
+        </section>}
         <section className="client-persona-callout">
           <div><strong><ShieldCheck size={16} /> Persona de uso</strong><span>{persona ? `P${client.idPersona} · ${persona.label}` : 'Persona ainda não definida'}</span><small>{!persona ? 'Defina a persona para calcular a cota mensal.' : persona.quota == null ? 'Sem cota mensal definida na tabela.' : `${hours.toFixed(1).replace('.', ',')} de ${persona.quota} horas utilizadas/reservadas neste mês.`}</small></div>
           <div className="client-persona-edit"><label>Classificação<PersonaCombobox value={personaValue} onChange={next => { setPersonaValue(next); setError(''); setPersonaFeedback('') }} /></label><button type="button" className={`client-profile-action ${personaChanged ? 'persona-save-active' : ''}`} disabled={!personaChanged || personaBusy} onClick={savePersona}>{personaBusy ? 'Salvando...' : 'Salvar persona'}</button>{personaFeedback && <p className={personaFeedback.includes('sucesso') ? 'success-note' : 'form-message'} role="status">{personaFeedback}</p>}</div>
@@ -2072,7 +2101,7 @@ function ClientProfileDialog({ client, reservations, tickets, auditItems, close,
         </section>
         <form className="client-profile-edit-form" onSubmit={save}>
           {editing ? <div className="client-profile-grid client-profile-grid-edit">
-            <label>Nome completo<input required maxLength={100} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
+            <label>Nome completo e sobrenome<input required maxLength={100} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
             <label>E-mail<input required type="email" maxLength={100} value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
             <label>Telefone / WhatsApp<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} /></label>
             <label>Organização<input required maxLength={100} value={form.organizacao} onChange={event => setForm({ ...form, organizacao: event.target.value })} /><small>A alteração vale só para seu cadastro. Organizações novas ficam pendentes de classificação.</small></label>
@@ -2265,7 +2294,7 @@ function AppInner({ onCodeSent, initialView = 'home' }) {
       })
       .finally(() => { if (active) setMyReservationsLoaded(true) })
     return () => { active = false }
-  }, [user])
+  }, [user?.idUsuario])
   function updateCancel(item, reason) {
     const update = items => items.map(r => r.idReserva === item.idReserva ? { ...r, statusReserva: 'Cancelada', motivoCancelamento: reason } : r)
     setReservations(update); setMyReservations(update)
@@ -2301,7 +2330,7 @@ function AppInner({ onCodeSent, initialView = 'home' }) {
       {dataError && <p className="form-message" role="alert">{dataError} Atualize a página para tentar novamente.</p>}
       {view === 'home' && <Home spaces={spaces} spacesLoaded={spacesLoaded} onConsultSpace={showSpaceAvailability} setSignupOpen={() => setView('signup')} onOpenCalendar={openCalendar} onSearchAvailability={(date, kind) => { setCalendarQuery({ date, kind, spaceId: '' }); setView('calendar'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
       {view === 'portal' && user && <PortalHome user={user} items={myReservations} reservationsLoaded={myReservationsLoaded} onOpenCalendar={openCalendar} onOpenReservations={() => setView('reservations')} />}
-      {view === 'calendar' && <CalendarPage spaces={spaces} spacesLoaded={spacesLoaded} onReserve={openBooking} initialDate={calendarQuery.date || localDateValue()} initialKind={calendarQuery.kind} initialSpaceId={calendarQuery.spaceId} availabilityVersion={availabilityVersion} />}
+      {view === 'calendar' && <CalendarPage spaces={spaces} spacesLoaded={spacesLoaded} onReserve={openBooking} onBack={() => { setView('home'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} initialDate={calendarQuery.date || localDateValue()} initialKind={calendarQuery.kind} initialSpaceId={calendarQuery.spaceId} availabilityVersion={availabilityVersion} />}
       {view === 'reservations' && <ReservationsPage items={myReservations} onCancel={updateCancel} />}
       {view === 'help' && <HelpPage />}
       {view === 'access' && <AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} />}

@@ -90,9 +90,13 @@ public class ReservaService {
         Reserva criada = reservas.save(reserva);
         registrar("reserva", criada.getIdReserva(), "CRIACAO",
                 "Reserva criada com status: " + criada.getStatusReserva(), solicitante.getIdUsuario(), solicitadaEm);
-        notificacoes.enviar(List.of(solicitante), "RESERVA_CRIADA", "Solicitação de reserva recebida",
-                "Sua reserva \"" + criada.getTituloEvento() + "\" foi registrada como " + criada.getStatusReserva()
-                        + ". O horário fica reservado pela ordem do pedido.");
+        notificacoes.enviar(usuarios.findAllByAtivoTrueAndIdPerfilLessThan(4), "RESERVA_CRIADA",
+                "Solicitação de reserva recebida",
+                solicitante.getNomeCompleto() + " (" + solicitante.getEmail() + ") solicitou \""
+                        + criada.getTituloEvento() + "\" no espaço \"" + espaco.getNomeEspaco() + "\" para "
+                        + criada.getDataReserva() + ", das "
+                        + criada.getHorarioInicio() + " às " + criada.getHorarioFim() + ". Status: "
+                        + criada.getStatusReserva() + ".");
         if (excedeCota) notificarExcedente(criada, solicitante, limiteMensal, horasPedido);
         return criada;
     }

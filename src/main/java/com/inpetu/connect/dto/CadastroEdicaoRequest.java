@@ -6,7 +6,9 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record CadastroEdicaoRequest(
-        @NotBlank @Size(max = 100) String nomeCompleto,
+        @NotBlank @Size(max = 100)
+        @Pattern(regexp = "^\\s*\\S+(?:\\s+\\S+)+\\s*$", message = "Informe nome e sobrenome.")
+        String nomeCompleto,
         @NotBlank @Email @Size(max = 100) String email,
         @Size(max = 20) @Pattern(regexp = "^$|\\(\\d{2}\\) 9\\d{4}-\\d{4}",
                 message = "Informe um celular no formato (48) 99999-9999.") String telefone,

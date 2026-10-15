@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { AccessPage, Avatar, BookingModal, CalendarPage, LoginInline, SignupPage } from './App.jsx'
+import { AccessPage, Avatar, BookingModal, CalendarPage, LoginInline, PersonaCombobox, SignupPage } from './App.jsx'
 
 const originalCreateObjectURL = URL.createObjectURL
 const originalRevokeObjectURL = URL.revokeObjectURL
@@ -79,6 +79,38 @@ describe('Login password visibility', () => {
 })
 
 describe('Public signup phone format', () => {
+  it('requires a surname before sending a signup request', async () => {
+    render(<SignupPage onBack={vi.fn()} onCodeSent={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText(/Nome completo e sobrenome/), { target: { value: 'Ana' } })
+    fireEvent.submit(screen.getByRole('button', { name: /Criar conta/ }).closest('form'))
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Informe nome e sobrenome.')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('shows and hides both signup passwords without changing their values', () => {
+    render(<SignupPage onBack={vi.fn()} onCodeSent={vi.fn()} />)
+    const password = screen.getByLabelText(/^Senha/)
+    const confirmation = screen.getByLabelText(/Confirmar senha/)
+
+    fireEvent.change(password, { target: { value: 'SenhaSegura123!' } })
+    fireEvent.change(confirmation, { target: { value: 'SenhaSegura123!' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar senha' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar confirmação da senha' }))
+
+    expect(password.type).toBe('text')
+    expect(password.value).toBe('SenhaSegura123!')
+    expect(confirmation.type).toBe('text')
+    expect(confirmation.value).toBe('SenhaSegura123!')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ocultar senha' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ocultar confirmação da senha' }))
+    expect(password.type).toBe('password')
+    expect(password.value).toBe('SenhaSegura123!')
+    expect(confirmation.type).toBe('password')
+    expect(confirmation.value).toBe('SenhaSegura123!')
+  })
+
   it('sends the formatted phone value accepted by the API', async () => {
     globalThis.fetch.mockResolvedValue({
       ok: true,
@@ -116,6 +148,19 @@ describe('Public signup phone format', () => {
   })
 })
 
+describe('Persona selection', () => {
+  it('offers all personas in an accessible selector and reports the selected value', () => {
+    const onChange = vi.fn()
+    render(<PersonaCombobox value="" onChange={onChange} />)
+    const select = screen.getByRole('combobox', { name: 'Classificação por persona' })
+
+    expect(screen.getAllByRole('option')).toHaveLength(7)
+    fireEvent.change(select, { target: { value: '3' } })
+
+    expect(onChange).toHaveBeenCalledWith('3')
+  })
+})
+
 describe('Calendar navigation', () => {
   const spaces = [{ idEspaco: 42, nomeEspaco: 'Coworking', tipoEspaco: 'Coworking', ativo: true, capacidadePessoas: 35 }]
 
@@ -144,6 +189,15 @@ describe('Calendar navigation', () => {
 
     expect(screen.getByRole('button', { name: /Coworking, até 35 pessoas/ }).getAttribute('aria-pressed')).toBe('true')
     await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled())
+  })
+
+  it('returns from the booking page when the back button is clicked', () => {
+    const onBack = vi.fn()
+    render(<CalendarPage spaces={spaces} spacesLoaded initialDate="2026-10-15" onReserve={vi.fn()} onBack={onBack} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }))
+
+    expect(onBack).toHaveBeenCalledOnce()
   })
 })
 
