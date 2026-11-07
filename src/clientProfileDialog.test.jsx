@@ -148,4 +148,36 @@ describe('client profile dialog', () => {
       expect(panel.textContent).not.toBe(previousContent)
     }
   })
+
+  it('allows a coordinator to change a user profile from the profile dialog', async () => {
+    const client = {
+      idUsuario: 12,
+      idPerfil: 3,
+      nomeCompleto: 'Pessoa de teste',
+      email: 'pessoa@example.invalid',
+      ativo: true,
+    }
+    const onRole = vi.fn().mockResolvedValue({ ...client, idPerfil: 4 })
+
+    render(<ClientProfileDialog
+      client={client}
+      reservations={[]}
+      tickets={[]}
+      auditItems={[]}
+      close={vi.fn()}
+      onSave={vi.fn()}
+      onPersona={vi.fn()}
+      onRole={onRole}
+      canManageRole
+      onDeactivate={vi.fn()}
+    />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Pessoa de teste' })
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Perfil de acesso na ficha' }), { target: { value: '4' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Salvar perfil' }))
+
+    expect(onRole).toHaveBeenCalledWith(client, 4)
+    expect(await within(dialog).findByText('Perfil de acesso atualizado. A pessoa deverá entrar novamente.')).toBeTruthy()
+    expect(within(dialog).getByText('Solicitante')).toBeTruthy()
+  })
 })

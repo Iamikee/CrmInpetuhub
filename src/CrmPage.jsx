@@ -73,9 +73,6 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const [spaceCreateBusy, setSpaceCreateBusy] = useState(false)
   const [spaceCreateError, setSpaceCreateError] = useState('')
   const [staff, setStaff] = useState([])
-  const [roleTarget, setRoleTarget] = useState(null)
-  const [roleSaveBusy, setRoleSaveBusy] = useState(false)
-  const [roleSaveError, setRoleSaveError] = useState('')
   const [partnerScope, setPartnerScope] = useState('all')
   const [reservationFiltersOpen, setReservationFiltersOpen] = useState(false)
   const [reservationStatusFilter, setReservationStatusFilter] = useState('Todas')
@@ -785,20 +782,39 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       setSpaceStatusBusy(false)
     }
   }
-  async function saveRole() {
-    if (!roleTarget) return
-    setRoleSaveBusy(true)
-    setRoleSaveError('')
-    try {
-      const updated = await request(`/usuarios/${roleTarget.idUsuario}/perfil`, { method: 'PATCH', body: JSON.stringify({ idPerfil: Number(roleTarget.idPerfil) }) })
-      setStaff(items => items.map(person => person.idUsuario === updated.idUsuario ? updated : person))
-      notify('Permissões da equipe atualizadas.')
-      setRoleTarget(null)
-    } catch (error) {
-      setRoleSaveError(error.message)
-    } finally {
-      setRoleSaveBusy(false)
+  async function saveRole(target, idPerfil) {
+    const previous = [...staff, ...clientUsers].find(person => person.idUsuario === target.idUsuario) || target
+    const updated = await request(`/usuarios/${target.idUsuario}/perfil`, {
+      method: 'PATCH',
+      body: JSON.stringify({ idPerfil }),
+    })
+    const merged = { ...previous, ...updated }
+    const roleUser = Number(updated.idPerfil) === 4
+      ? { ...merged, organizacao: previous.organizacao || 'Não informada' }
+      : merged
+    if (Number(updated.idPerfil) === 4) {
+      setStaff(items => items.filter(person => person.idUsuario !== updated.idUsuario))
+      setClientUsers(items => items.some(person => person.idUsuario === updated.idUsuario)
+        ? items.map(person => person.idUsuario === updated.idUsuario ? roleUser : person)
+        : [roleUser, ...items])
+      setClientProfile(current => current?.idUsuario === updated.idUsuario ? roleUser : current)
+    } else {
+      setClientUsers(items => items.filter(person => person.idUsuario !== updated.idUsuario))
+      setStaff(items => items.some(person => person.idUsuario === updated.idUsuario)
+        ? items.map(person => person.idUsuario === updated.idUsuario ? merged : person)
+        : [merged, ...items])
+      setClientProfile(current => current?.idUsuario === updated.idUsuario ? merged : current)
+      setPartners(items => items.filter(person => person.userId !== updated.idUsuario))
     }
+    notify(`Perfil alterado para ${getProfileRoleLabel(updated)}. A pessoa deverá entrar novamente.`)
+    return roleUser
+  }
+  function openUserFicha(person) {
+    const client = clientUsers.find(item => item.idUsuario === person.idUsuario)
+      || staff.find(item => item.idUsuario === person.idUsuario)
+      || person
+    setSection('Cadastros')
+    setClientProfile(client)
   }
   function exportPartners() {
     const rows = [['Organização', 'Responsável', 'E-mail']]
@@ -813,6 +829,8 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   }
   async function sendAnswer() { if (!answer.trim() || !selectedTicket) return; try { await request(`/duvidas/${selectedTicket.idDuvida}/responder`, { method: 'POST', body: JSON.stringify({ resposta: answer }) }); setTickets(items => items.map(ticket => ticket.idDuvida === selectedTicket.idDuvida ? { ...ticket, respostaEquipe: answer, statusAtendimento: 'Respondida' } : ticket)); setSelectedTicket(current => current?.idDuvida === selectedTicket.idDuvida ? { ...current, respostaEquipe: answer, statusAtendimento: 'Respondida' } : current); setAnswer(''); notify('Resposta registrada no chamado.') } catch (error) { notify(error.message) } }
   const pending = reservations.filter(item => item.statusReserva === 'Pendente')
+  const managedUsers = [...staff, ...clientUsers]
+    .sort((left, right) => (left.nomeCompleto || '').localeCompare(right.nomeCompleto || '', 'pt-BR'))
   const filteredReservations = reservations.filter(item =>
     (reservationStatusFilter === 'Todas' || (reservationStatusFilter === 'Excede cota' ? item.excedeCota : item.statusReserva === reservationStatusFilter)) &&
     (!reservationDateFilter || item.dataReserva === reservationDateFilter) &&
@@ -1068,7 +1086,16 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
           return <ExtensionPanel key={`${section}-${index}`} API={API} request={request} CrmTitle={CrmTitle} notify={notify} />
         })}
         {section === 'Auditoria' && <><CrmTitle title="Histórico de ações" description="Acompanhe quem fez cada alteração, quando aconteceu e qual registro foi afetado." /><div className="crm-panel audit-panel"><div className="audit-toolbar"><label className="audit-search"><Search size={17} /><input type="search" value={auditQuery} onChange={event => setAuditQuery(event.target.value)} placeholder="Buscar por responsável, ação ou registro" aria-label="Buscar no histórico de auditoria" /></label><label className="audit-filter-label">Ação<select value={auditActionFilter} onChange={event => setAuditActionFilter(event.target.value)} aria-label="Filtrar por ação"><option>Todas</option>{auditActions.map(action => <option key={action}>{action}</option>)}</select></label><span className="audit-result-count">{filteredAuditItems.length} {filteredAuditItems.length === 1 ? 'registro' : 'registros'}</span></div><div className="audit-table-wrap"><table className="data-table audit-table"><thead><tr><th>Data e hora</th><th>Responsável</th><th>Ação</th><th>Registro afetado</th><th>Detalhes</th></tr></thead><tbody>{filteredAuditItems.map((item, i) => <tr key={`${item.time}-${item.user}-${i}`}><td><span className="audit-time">{item.time}</span></td><td><strong className="audit-actor">{item.user}</strong></td><td><span className="audit-action"><i />{item.action}</span></td><td><strong className="audit-target">{item.target}</strong></td><td className="audit-detail">{item.detail}</td></tr>)}</tbody></table>{filteredAuditItems.length === 0 && <div className="audit-empty"><ListChecks size={22} /><strong>{auditItems.length ? 'Nenhum registro encontrado' : 'Ainda não há ações registradas'}</strong><span>{auditItems.length ? 'Tente ajustar a busca ou o filtro selecionado.' : 'As alterações realizadas pela equipe aparecerão aqui.'}</span></div>}</div></div></>}
-        {section === 'Equipe' && user.perfil === 1 && <><CrmTitle title="Equipe e permissões" description="Gerencie colaboradores e papéis de acesso ao InPETU Connect." /><div className="crm-panel"><table className="data-table"><thead><tr><th>Colaborador</th><th>E-mail</th><th>Perfil</th><th>Status</th><th /></tr></thead><tbody>{staff.map(person => { const isCurrentUser = person.email?.toLowerCase() === user.email?.toLowerCase(); return <tr key={person.idUsuario}><td><div className="team-person-cell"><Avatar user={person} tamanho={34} /><span><strong>{person.nomeCompleto}</strong><small>{person.cargoVinculo}</small></span></div></td><td>{person.email}</td><td>{['', 'Coordenador', 'Gestor de espaços', 'Atendente'][person.idPerfil]}</td><td><span className={`status-pill ${person.ativo ? 'status-confirmed' : 'status-cancelled'}`}><i />{person.ativo ? 'Ativo' : 'Inativo'}</span></td><td>{isCurrentUser ? <span className="table-action-disabled" title="Você não pode alterar seu próprio perfil">Seu perfil</span> : <button className="table-action" onClick={() => setRoleTarget({ ...person })}>Gerenciar papel</button>}</td></tr> })}</tbody></table></div></>}
+        {section === 'Equipe' && user.perfil === 1 && <><CrmTitle title="Equipe e permissões" description="Gerencie os usuários e papéis de acesso ao InPETU Connect." /><div className="crm-panel"><table className="data-table"><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Status</th><th>Ficha</th></tr></thead><tbody>{managedUsers.map(person => {
+          const isCurrentUser = person.idUsuario === user.idUsuario
+          return <tr key={person.idUsuario}>
+            <td><div className="team-person-cell"><Avatar user={person} tamanho={34} /><span><strong>{person.nomeCompleto}</strong><small>{person.cargoVinculo || person.organizacao || 'Sem vínculo informado'}</small></span></div></td>
+            <td>{person.email}</td>
+            <td>{getProfileRoleLabel(person)}</td>
+            <td><span className={`status-pill ${person.ativo ? 'status-confirmed' : 'status-cancelled'}`}><i />{person.ativo ? 'Ativo' : 'Inativo'}</span></td>
+            <td>{isCurrentUser ? <span className="table-action-disabled" title="Você não pode alterar seu próprio perfil">Seu perfil</span> : <button type="button" className="table-action" onClick={() => openUserFicha(person)}>Abrir ficha</button>}</td>
+          </tr>
+        })}</tbody></table></div></>}
       </div></main>{toast && <div className="toast"><Check size={17} />{toast}</div>}
     <Modal open={Boolean(reservationCancelTarget)} close={() => { if (!reservationCancelBusy) { setReservationCancelTarget(null); setReservationCancelError('') } }} title="Cancelar reserva">
       <div className="cancel-summary"><span>RESERVA #{reservationCancelTarget?.idReserva}</span><strong>{reservationCancelTarget?.tituloEvento}</strong><small>{reservationCancelTarget?.dataReserva} · {formatTimeForDisplay(reservationCancelTarget?.horarioInicio)}-{formatTimeForDisplay(reservationCancelTarget?.horarioFim)}</small></div>
@@ -1100,13 +1127,12 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       {negotiationError && <p className="form-message" role="alert">{negotiationError}</p>}
       <Button icon={Check} disabled={!negotiationNote.trim() || negotiationBusy} onClick={recordNegotiationAndApprove}>{negotiationBusy ? 'Registrando...' : 'Registrar negociação e aprovar'}</Button>
     </Modal>
-    <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
-    <Modal open={Boolean(roleTarget)} close={() => { if (!roleSaveBusy) { setRoleTarget(null); setRoleSaveError('') } }} title="Gerenciar papel">{roleTarget && <><div className="classify-org"><Avatar user={roleTarget} tamanho={40} className="org-avatar" /><span><strong>{roleTarget.nomeCompleto}</strong><small>{roleTarget.email}</small></span></div><label className="role-select-label">Perfil de acesso<select value={roleTarget.idPerfil} onChange={event => { setRoleTarget({ ...roleTarget, idPerfil: Number(event.target.value) }); setRoleSaveError('') }}><option value="1">Coordenador</option><option value="2">Gestor de espaços</option><option value="3">Atendente</option></select></label>{roleSaveError && <p className="form-message" role="alert">{roleSaveError}</p>}<Button icon={Check} disabled={roleSaveBusy || Number(roleTarget.idPerfil) === staff.find(person => person.idUsuario === roleTarget.idUsuario)?.idPerfil} onClick={saveRole}>{roleSaveBusy ? 'Salvando...' : 'Salvar papel'}</Button></>}</Modal>
+    <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onRole={saveRole} canManageRole={user.perfil === 1 && clientProfile?.idUsuario !== user.idUsuario} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
     <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError('') } }} title="Criar cadastro para uma organização">
       <form className="form-stack" onSubmit={createRegistration}>
         <p className="access-intro">Cadastre a organização e uma pessoa responsável. A pessoa entrará usando e-mail e senha.</p>
         <label>Nome da organização<input required maxLength={100} value={newRegistration.organizacao} onChange={event => setNewRegistration({ ...newRegistration, organizacao: event.target.value })} /></label>
-        <label>Nome do responsável<input required maxLength={100} value={newRegistration.nomeCompleto} onChange={event => setNewRegistration({ ...newRegistration, nomeCompleto: event.target.value })} /></label>
+        <label>Nome e sobrenome do responsável<input required maxLength={100} value={newRegistration.nomeCompleto} onChange={event => setNewRegistration({ ...newRegistration, nomeCompleto: event.target.value })} /></label>
         <label>E-mail<input required type="email" maxLength={100} value={newRegistration.email} onChange={event => setNewRegistration({ ...newRegistration, email: event.target.value })} /></label>
         <div className="form-row">
           <label>Telefone (opcional)<PhoneInput value={newRegistration.telefone} onChange={telefone => setNewRegistration({ ...newRegistration, telefone })} /></label>

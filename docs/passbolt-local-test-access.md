@@ -36,7 +36,7 @@ O perfil `demo` valida que a URL JDBC aponta para `localhost`, `127.0.0.1` ou `:
 
 ## Credenciais do primeiro coordenador em produção
 
-Se uma implantação estiver conectada a um banco novo, crie um item separado no Passbolt para o coordenador de produção. Configure `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD` no ambiente hospedado para a primeira inicialização, confirme o login e então remova essas duas variáveis. O bootstrap só cria a conta se o e-mail ainda não existir; ele não redefine a senha nem modifica uma conta existente.
+Se uma implantação estiver conectada a um banco novo, crie um item separado no Passbolt para o coordenador de produção. Configure `APP_ADMIN_EMAIL` e `APP_ADMIN_PASSWORD` no ambiente hospedado para a primeira inicialização, confirme o login e então remova essas duas variáveis. O bootstrap só cria a conta se o banco ainda não tiver nenhum usuário com perfil de Coordenador (`idPerfil = 1`); ele não redefine a senha nem modifica uma conta existente.
 
 Não reutilize a credencial local `admin@inpetu.test` em produção. Em bancos já usados, confira as contas de equipe existentes e faça a redefinição de senha pelo procedimento administrativo adequado. Remover o seed de código não apaga os registros já persistidos.
 

@@ -121,7 +121,7 @@ class ReservaServiceTest {
     }
 
     @Test
-    void solicitanteSemClassificacaoRecebeReservaPendente() {
+    void novaSolicitacaoDeReservaNotificaSomenteEquipe() {
         Espaco espaco = new Espaco();
         espaco.setIdEspaco(2);
         espaco.setAtivo(true);
@@ -133,6 +133,11 @@ class ReservaServiceTest {
         when(espacos.bloquearParaReserva(2)).thenReturn(Optional.of(espaco));
         when(usuarios.findByEmail("visitante@exemplo.com")).thenReturn(Optional.of(usuario));
         when(usuarios.bloquearParaCota(7)).thenReturn(Optional.of(usuario));
+        Usuario administrador = new Usuario();
+        administrador.setIdUsuario(2);
+        administrador.setAtivo(true);
+        administrador.setIdPerfil(1);
+        when(usuarios.findAllByAtivoTrueAndIdPerfilLessThan(4)).thenReturn(List.of(administrador));
         when(reservas.existeConflito(eq(2), any(LocalDate.class), any(LocalTime.class), any(LocalTime.class)))
                 .thenReturn(false);
         when(reservas.save(any(Reserva.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -144,6 +149,8 @@ class ReservaServiceTest {
         assertEquals("Pendente", reserva.getStatusReserva());
         assertEquals("+5548999999999", reserva.getTelefoneContato());
         verify(reservas).save(reserva);
+        verify(notificacoes).enviar(eq(List.of(administrador)), eq("RESERVA_CRIADA"),
+                eq("Solicitação de reserva recebida"), anyString());
     }
 
     @Test

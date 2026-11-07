@@ -8,6 +8,7 @@ import org.springframework.boot.ApplicationRunner;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -18,18 +19,24 @@ class EspacoCatalogoBootstrapTest {
     @Test
     void preservesExistingRoomsCreatesMissingRoomsAndIsIdempotent() throws Exception {
         EspacoRepository repository = mock(EspacoRepository.class);
+        Espaco retiredClassroom = room(2, "Sala de Aula 1", "Sala de aula", 35, "Projetor e quadro");
+        retiredClassroom.setAtivo(false);
+        retiredClassroom.setMotivoIndisponibilidade("Fora do catálogo atual; histórico e reservas preservados.");
+        Espaco retiredTour = room(6, "Visita Guiada", "Visita guiada", 20, "Acompanhamento");
+        retiredTour.setAtivo(false);
+        retiredTour.setMotivoIndisponibilidade("Fora do catálogo atual; histórico e reservas preservados.");
         List<Espaco> rooms = new ArrayList<>(List.of(
             room(1, "Auditório Principal", "Auditório", 80, "Projetor e som"),
-            room(2, "Sala de Aula 1", "Sala de aula", 35, "Projetor e quadro"),
+            retiredClassroom,
             room(3, "Área de Coworking", "Coworking", 24, "Mesas compartilhadas, Wi-Fi"),
             room(4, "Sala de Reunião 1", "Sala de reunião", 6, "Monitor e videoconferência"),
             room(5, "Sala de Reunião 2", "Sala de reunião", 10, "Monitor e quadro"),
-            room(6, "Visita Guiada", "Visita guiada", 20, "Acompanhamento")
+            retiredTour
         ));
         AtomicInteger nextId = new AtomicInteger(6);
         when(repository.findAllByOrderByNomeEspaco()).thenAnswer(invocation -> new ArrayList<>(rooms));
         when(repository.save(any(Espaco.class))).thenAnswer(invocation -> {
-            Espaco room = invocation.getArgument(0);
+            Espaco room = Objects.requireNonNull(invocation.getArgument(0));
             if (room.getIdEspaco() == null) {
                 room.setIdEspaco(nextId.incrementAndGet());
                 rooms.add(room);
@@ -51,7 +58,7 @@ class EspacoCatalogoBootstrapTest {
         runner.run(args);
 
         assertEquals(11, rooms.size());
-        assertEquals(10, rooms.stream().filter(room -> Boolean.TRUE.equals(room.getAtivo())).count());
+        assertEquals(8, rooms.stream().filter(room -> Boolean.TRUE.equals(room.getAtivo())).count());
         assertFalse(auditorium.getAtivo());
         assertEquals("Auditório personalizado", auditorium.getNomeEspaco());
         assertEquals("Eventos", auditorium.getTipoEspaco());
@@ -60,8 +67,8 @@ class EspacoCatalogoBootstrapTest {
         assertEquals("Em manutenção", auditorium.getMotivoIndisponibilidade());
         assertEquals("Alteração persistente.", auditorium.getDescricao());
         assertEquals("auditorio", auditorium.getCodigoCatalogo());
-        assertTrue(find(rooms, "Sala de Aula 1").getAtivo());
-        assertTrue(find(rooms, "Visita Guiada").getAtivo());
+        assertFalse(find(rooms, "Sala de Aula 1").getAtivo());
+        assertFalse(find(rooms, "Visita Guiada").getAtivo());
         assertEquals("Projetor e som", auditorium.getEquipamentosDisponiveis());
         assertEquals(3, find(rooms, "Área de Coworking").getIdEspaco());
         assertEquals(24, find(rooms, "Área de Coworking").getCapacidadePessoas());
@@ -71,6 +78,33 @@ class EspacoCatalogoBootstrapTest {
         assertEquals("7 sofás, 1 arquibancada", find(rooms, "Sala VIA hub").getEquipamentosDisponiveis());
         assertEquals("image/jpeg", find(rooms, "Sala Distrito de Inovação").getTipoImagem());
         verify(repository, never()).delete(any(Espaco.class));
+    }
+
+    @Test
+    void preservesManuallyReactivatedLegacySpaceAcrossStartup() throws Exception {
+        EspacoRepository repository = mock(EspacoRepository.class);
+        Espaco legacyRoom = room(2, "Sala de Aula 1", "Sala de aula", 35, "Projetor e quadro");
+        legacyRoom.setAtivo(true);
+        legacyRoom.setMotivoIndisponibilidade(null);
+        List<Espaco> rooms = new ArrayList<>(List.of(legacyRoom));
+        when(repository.findAllByOrderByNomeEspaco()).thenAnswer(invocation -> new ArrayList<>(rooms));
+        AtomicInteger nextId = new AtomicInteger(2);
+        when(repository.save(any(Espaco.class))).thenAnswer(invocation -> {
+            Espaco saved = invocation.getArgument(0);
+            if (saved.getIdEspaco() == null) {
+                saved.setIdEspaco(nextId.incrementAndGet());
+                rooms.add(saved);
+            }
+            return saved;
+        });
+
+        ApplicationRunner startupRunner = new EspacoCatalogoBootstrap().atualizarCatalogoDeEspacos(repository);
+        ApplicationArguments startupArguments = mock(ApplicationArguments.class);
+        startupRunner.run(startupArguments);
+        startupRunner.run(startupArguments);
+
+        assertEquals(Boolean.TRUE, legacyRoom.getAtivo());
+        assertNull(legacyRoom.getMotivoIndisponibilidade());
     }
 
     private Espaco room(int id, String name, String type, int capacity, String equipment) {

@@ -109,7 +109,8 @@ public class CadastroPublicoService {
         try {
             emailDomainValidator.validate(email);
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Não foi possível usar este e-mail. Verifique o endereço.", e);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Não foi possível usar este e-mail. Verifique o endereço.", e);
         }
 
         if (isRateLimitedByIp(ip)) {

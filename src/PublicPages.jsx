@@ -48,6 +48,7 @@ export function SignupPage({ onBack, onCodeSent }) {
   async function submit(event) {
     event.preventDefault()
     setStatus('')
+    if (form.nomeCompleto.trim().split(/\s+/).length < 2) return setStatus('Informe nome e sobrenome.')
     if (form.senha !== form.confirmarSenha) return setStatus('As senhas não coincidem.')
     if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) return setStatus('Informe DDI, DDD e número válidos.')
     try {
@@ -80,13 +81,13 @@ export function SignupPage({ onBack, onCodeSent }) {
     <section className="account-card account-card-signup">
       <p className="account-description">Preencha seus dados. A classificação da organização é feita pela equipe InPETU.</p>
       <form className="form-stack account-form" onSubmit={submit}>
-        <label>Nome completo <span aria-hidden="true">*</span><input required autoComplete="name" value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: e.target.value })} /></label>
+        <label>Nome completo e sobrenome <span aria-hidden="true">*</span><input required autoComplete="name" value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: e.target.value })} /></label>
         <label>E-mail <span aria-hidden="true">*</span><input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
         <label>Telefone<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} /></label>
         <label>Organização <span aria-hidden="true">*</span><input required value={form.organizacao} onChange={e => setForm({ ...form, organizacao: e.target.value })} /></label>
         <label>Cargo ou vínculo <span aria-hidden="true">*</span><input required value={form.cargoVinculo} onChange={e => setForm({ ...form, cargoVinculo: e.target.value })} /></label>
         <label>Senha <span aria-hidden="true">*</span><PasswordInput required minLength={8} maxLength={64} autoComplete="new-password" value={form.senha} onChange={e => setForm({ ...form, senha: e.target.value })} /></label>
-        <label>Confirmar senha <span aria-hidden="true">*</span><PasswordInput required minLength={8} maxLength={64} autoComplete="new-password" value={form.confirmarSenha} onChange={e => setForm({ ...form, confirmarSenha: e.target.value })} /></label>
+        <label>Confirmar senha <span aria-hidden="true">*</span><PasswordInput toggleLabel="confirmação da senha" required minLength={8} maxLength={64} autoComplete="new-password" value={form.confirmarSenha} onChange={e => setForm({ ...form, confirmarSenha: e.target.value })} /></label>
         {status && <p className="account-notice account-notice-error" role="alert">{status}</p>}
         {sendFailedEmail && <button className="button button-primary" type="button" disabled={resending} onClick={resendAfterSendFailure}>{resending ? 'Reenviando...' : 'Reenviar código'}</button>}
         <Button type="submit" icon={ArrowRight}>Criar conta</Button>
@@ -115,9 +116,9 @@ export function PasswordChangePage({ user, onLogout, onPasswordChanged }) {
     <section className="account-card">
       <p className="account-description">Olá, {user?.nome?.split(' ')[0] || 'usuário'}. Escolha uma senha nova para continuar usando o InPETU Connect.</p>
       <form className="form-stack account-form" onSubmit={submit}>
-        <label>Senha temporária<input required type="password" autoComplete="current-password" value={form.senhaAtual} onChange={event => setForm({ ...form, senhaAtual: event.target.value })} /></label>
-        <label>Nova senha<input required minLength="8" maxLength="64" type="password" autoComplete="new-password" value={form.novaSenha} onChange={event => setForm({ ...form, novaSenha: event.target.value })} /></label>
-        <label>Confirmar nova senha<input required minLength="8" maxLength="64" type="password" autoComplete="new-password" value={form.confirmarSenha} onChange={event => setForm({ ...form, confirmarSenha: event.target.value })} /></label>
+        <label>Senha temporária<PasswordInput toggleLabel="senha temporária" required autoComplete="current-password" value={form.senhaAtual} onChange={event => setForm({ ...form, senhaAtual: event.target.value })} /></label>
+        <label>Nova senha<PasswordInput toggleLabel="nova senha" required minLength="8" maxLength="64" autoComplete="new-password" value={form.novaSenha} onChange={event => setForm({ ...form, novaSenha: event.target.value })} /></label>
+        <label>Confirmar nova senha<PasswordInput toggleLabel="confirmação da nova senha" required minLength="8" maxLength="64" autoComplete="new-password" value={form.confirmarSenha} onChange={event => setForm({ ...form, confirmarSenha: event.target.value })} /></label>
         {error && <p className="account-notice account-notice-error" role="alert">{error}</p>}
         <Button type="submit" disabled={busy}>{busy ? 'Salvando...' : 'Salvar nova senha'}</Button>
       </form>

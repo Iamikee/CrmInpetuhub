@@ -1066,6 +1066,10 @@ body .public-app .booking-legend > span {
   background: #fff;
 }
 
+.public-app .booking-date-section {
+  scroll-margin-top: 1.5rem;
+}
+
 .public-app .booking-section-heading {
   display: flex;
   align-items: flex-start;

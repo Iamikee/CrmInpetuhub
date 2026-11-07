@@ -31,25 +31,25 @@ class ProfileRequestValidationTest {
 
     @Test
     void acceptsInternationalPhoneAndEmptyOptionalPhone() {
-        assertTrue(validator.validate(new PerfilUsuarioRequest("Joana", "+5548999991234", "InPETU", "Pesquisadora")).isEmpty());
-        assertTrue(validator.validate(new PerfilUsuarioRequest("Joana", "", "InPETU", "Pesquisadora")).isEmpty());
+        assertTrue(validator.validate(new PerfilUsuarioRequest("Joana Silva", "+5548999991234", "InPETU", "Pesquisadora")).isEmpty());
+        assertTrue(validator.validate(new PerfilUsuarioRequest("Joana Silva", "", "InPETU", "Pesquisadora")).isEmpty());
     }
 
     @Test
     void rejectsPhoneWithoutInternationalPrefixOrWithInvalidLength() {
-        assertFalse(validator.validate(new PerfilUsuarioRequest("Joana", "48999991234", "InPETU", "Pesquisadora")).isEmpty());
-        assertFalse(validator.validate(new PerfilUsuarioRequest("Joana", "+554899999123456789", "InPETU", "Pesquisadora")).isEmpty());
+        assertFalse(validator.validate(new PerfilUsuarioRequest("Joana Silva", "48999991234", "InPETU", "Pesquisadora")).isEmpty());
+        assertFalse(validator.validate(new PerfilUsuarioRequest("Joana Silva", "+554899999123456789", "InPETU", "Pesquisadora")).isEmpty());
     }
 
     @Test
     void rejectsUnsupportedCountryCodesAcrossPhoneFlows() {
         String invalidPhone = "+999123456789";
         assertFalse(validator.validate(new CadastroPublicoRequest(
-                "Joana", "joana@example.test", invalidPhone, "InPETU", "Pesquisadora", "SenhaSegura123")).isEmpty());
+                "Joana Silva", "joana@example.test", invalidPhone, "InPETU", "Pesquisadora", "SenhaSegura123")).isEmpty());
         assertFalse(validator.validate(new PerfilUsuarioRequest(
-                "Joana", invalidPhone, "InPETU", "Pesquisadora")).isEmpty());
+                "Joana Silva", invalidPhone, "InPETU", "Pesquisadora")).isEmpty());
         assertFalse(validator.validate(new CadastroEdicaoRequest(
-                "Joana", "joana@example.test", invalidPhone, "InPETU", "Pesquisadora")).isEmpty());
+                "Joana Silva", "joana@example.test", invalidPhone, "InPETU", "Pesquisadora")).isEmpty());
         assertFalse(validator.validate(new DuvidaRequest(
                 "joana@example.test", invalidPhone, "Mensagem de teste.")).isEmpty());
         assertFalse(validator.validate(new ReservaRequest(
@@ -70,11 +70,11 @@ class ProfileRequestValidationTest {
                 "telefone");
         for (String invalidPhone : invalidPhones) {
             assertPhoneRejected(new CadastroPublicoRequest(
-                    "Joana", "joana@example.test", invalidPhone, "InPETU", "Pesquisadora", "SenhaSegura123"), "telefone");
+                    "Joana Silva", "joana@example.test", invalidPhone, "InPETU", "Pesquisadora", "SenhaSegura123"), "telefone");
             assertPhoneRejected(new CadastroEdicaoRequest(
-                    "Joana", "joana@example.test", invalidPhone, "InPETU", "Pesquisadora"), "telefone");
+                    "Joana Silva", "joana@example.test", invalidPhone, "InPETU", "Pesquisadora"), "telefone");
             assertPhoneRejected(new PerfilUsuarioRequest(
-                    "Joana", invalidPhone, "InPETU", "Pesquisadora"), "telefone");
+                    "Joana Silva", invalidPhone, "InPETU", "Pesquisadora"), "telefone");
             assertPhoneRejected(new DuvidaRequest(
                     "joana@example.test", invalidPhone, "Mensagem de teste."), "telefoneContato");
             assertPhoneRejected(new ReservaRequest(
@@ -100,11 +100,11 @@ class ProfileRequestValidationTest {
     private static List<PhoneRequest> phoneRequests(String phone) {
         return List.of(
                 new PhoneRequest(new CadastroPublicoRequest(
-                        "Joana", "joana@example.test", phone, "InPETU", "Pesquisadora", "SenhaSegura123"), "telefone"),
+                        "Joana Silva", "joana@example.test", phone, "InPETU", "Pesquisadora", "SenhaSegura123"), "telefone"),
                 new PhoneRequest(new CadastroEdicaoRequest(
-                        "Joana", "joana@example.test", phone, "InPETU", "Pesquisadora"), "telefone"),
+                        "Joana Silva", "joana@example.test", phone, "InPETU", "Pesquisadora"), "telefone"),
                 new PhoneRequest(new PerfilUsuarioRequest(
-                        "Joana", phone, "InPETU", "Pesquisadora"), "telefone"),
+                        "Joana Silva", phone, "InPETU", "Pesquisadora"), "telefone"),
                 new PhoneRequest(new DuvidaRequest(
                         "joana@example.test", phone, "Mensagem de teste."), "telefoneContato"),
                 new PhoneRequest(new ReservaRequest(

@@ -482,14 +482,14 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
     {invalid && <small className="phone-input-error" aria-live="polite">Informe DDI, DDD e número válidos.</small>}
   </div>
 }
-export function PasswordInput(props) {
+export function PasswordInput({ toggleLabel = 'senha', ...props }) {
   const [visible, setVisible] = useState(false)
   return <div className="password-input-wrap">
     <input {...props} type={visible ? 'text' : 'password'} />
     <button
       type="button"
       className="password-input-toggle"
-      aria-label={visible ? 'Ocultar senha' : 'Mostrar senha'}
+      aria-label={`${visible ? 'Ocultar' : 'Mostrar'} ${toggleLabel}`}
       aria-pressed={visible}
       onClick={() => setVisible(current => !current)}
     >
@@ -1429,7 +1429,7 @@ function PersonaCombobox({ value, onChange }) {
     </div>
   </Combobox>
 }
-export function ClientProfileDialog({ client, reservations, tickets, auditItems, close, onSave, onPersona, onDeactivate, canDeactivate, canResetPassword, onResetPassword }) {
+export function ClientProfileDialog({ client, reservations, tickets, auditItems, close, onSave, onPersona, onRole, canManageRole, onDeactivate, canDeactivate, canResetPassword, onResetPassword }) {
   const [tab, setTab] = useState('Dados gerais')
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({
@@ -1444,6 +1444,9 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   const [personaValue, setPersonaValue] = useState(client?.idPersona ? String(client.idPersona) : '')
   const [personaBusy, setPersonaBusy] = useState(false)
   const [personaFeedback, setPersonaFeedback] = useState('')
+  const [profileValue, setProfileValue] = useState(String(client?.idPerfil || 4))
+  const [profileBusy, setProfileBusy] = useState(false)
+  const [profileFeedback, setProfileFeedback] = useState('')
   const [deactivationOpen, setDeactivationOpen] = useState(false)
   const [deactivationReason, setDeactivationReason] = useState('')
   const [deactivationBusy, setDeactivationBusy] = useState(false)
@@ -1469,6 +1472,7 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   const activeProfileTab = clientProfileTabs.find(item => item.name === tab)
   const hours = monthlyQuotaUsed(reservations, client.idUsuario)
   const personaChanged = Boolean(personaValue) && Number(personaValue) !== Number(client.idPersona || 0)
+  const profileChanged = Number(profileValue) !== Number(client.idPerfil)
   const fields = [
     ['E-mail', form.email || 'Não informado'],
     ['Telefone / WhatsApp', form.telefone || 'Não informado'],
@@ -1508,6 +1512,20 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
       setPersonaBusy(false)
     }
   }
+  async function saveProfileRole() {
+    if (!profileChanged || profileBusy) return
+    setProfileBusy(true)
+    setProfileFeedback('')
+    try {
+      const updated = await onRole(client, Number(profileValue))
+      setProfileValue(String(updated.idPerfil))
+      setProfileFeedback('Perfil de acesso atualizado. A pessoa deverá entrar novamente.')
+    } catch (profileError) {
+      setProfileFeedback(profileError.message)
+    } finally {
+      setProfileBusy(false)
+    }
+  }
   async function deactivate(event) {
     event.preventDefault()
     if (!deactivationReason.trim() || deactivationBusy) return
@@ -1537,8 +1555,8 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
     } catch (resetFailure) { setResetError(resetFailure.message) } finally { setResetBusy(false) }
   }
   return <Modal open={Boolean(client)} close={close} title={client.nomeCompleto} wide>
-    <div className="client-profile-heading"><Avatar user={client} nome={client.nomeCompleto} tamanho={48} className="client-profile-avatar" /><div><p className="client-profile-intro">Cadastro de solicitante · ficha e histórico</p><span className={`client-profile-status ${client.ativo === false ? 'client-profile-inactive' : ''}`}><i />{client.ativo === false ? 'Cadastro inativo' : 'Cadastro ativo'}</span></div></div>
-    <div className="client-profile-tabs" role="tablist" aria-label="Seções da ficha do cliente">
+    <div className="client-profile-heading"><Avatar user={client} nome={client.nomeCompleto} tamanho={48} className="client-profile-avatar" /><div><p className="client-profile-intro">Ficha do usuário · dados e histórico</p><span className={`client-profile-status ${client.ativo === false ? 'client-profile-inactive' : ''}`}><i />{client.ativo === false ? 'Cadastro inativo' : 'Cadastro ativo'}</span></div></div>
+    <div className="client-profile-tabs" role="tablist" aria-label="Seções da ficha do usuário">
       {clientProfileTabs.map(({ name, id, count }) => (
         <button key={name} id={`client-profile-tab-${id}`} type="button" role="tab" aria-controls={`client-profile-panel-${id}`} aria-selected={tab === name} className={tab === name ? 'client-profile-tab-active' : ''} onClick={() => setTab(name)}>
           {name}{count !== undefined && ` (${count})`}
@@ -1552,6 +1570,20 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
           <div className="client-persona-edit"><label>Classificação<PersonaCombobox value={personaValue} onChange={next => { setPersonaValue(next); setError(''); setPersonaFeedback('') }} /></label><button type="button" className={`client-profile-action ${personaChanged ? 'persona-save-active' : ''}`} disabled={!personaChanged || personaBusy} onClick={savePersona}>{personaBusy ? 'Salvando...' : 'Salvar persona'}</button>{personaFeedback && <p className={personaFeedback.includes('sucesso') ? 'success-note' : 'form-message'} role="status">{personaFeedback}</p>}</div>
           <small className="client-profile-private-note">Visível somente para a equipe autorizada.</small>
         </section>
+        {canManageRole && <section className="client-persona-callout client-role-callout">
+          <div><strong><ShieldCheck size={16} /> Acesso ao sistema</strong><span>{getProfileRoleLabel(client)}</span><small>Gerencie o perfil e as permissões desta conta.</small></div>
+          <div className="client-persona-edit">
+            <label>Perfil de acesso<select aria-label="Perfil de acesso na ficha" className="persona-combobox-select" value={profileValue} onChange={event => { setProfileValue(event.target.value); setProfileFeedback('') }}>
+              <option value="1">Coordenador</option>
+              <option value="2">Gestor de Espaços</option>
+              <option value="3">Staff / Atendente</option>
+              <option value="4">Solicitante</option>
+            </select></label>
+            <button type="button" className={`client-profile-action ${profileChanged ? 'persona-save-active' : ''}`} disabled={!profileChanged || profileBusy} onClick={saveProfileRole}>{profileBusy ? 'Salvando...' : 'Salvar perfil'}</button>
+            {profileFeedback && <p className={profileFeedback.includes('atualizado') ? 'success-note' : 'form-message'} role="status">{profileFeedback}</p>}
+          </div>
+          <small className="client-profile-private-note">Disponível somente para coordenadores.</small>
+        </section>}
         {canResetPassword && (resetOpen || resetResult) && <section className="client-password-reset" aria-label="Redefinir senha">
           {resetResult ? <div className="temporary-password-result"><strong>Senha temporária gerada</strong><p>Copie e repasse ao usuário agora. Ela não será exibida novamente.</p><div><code>{resetResult}</code><button type="button" onClick={() => navigator.clipboard.writeText(resetResult).catch(() => setResetError('Não foi possível copiar automaticamente. Selecione e copie a senha.'))}>Copiar</button></div></div> : <form onSubmit={resetPassword}>
             <div><strong>Redefinir senha</strong><small>As sessões atuais serão invalidadas e o usuário deverá criar uma senha nova no próximo acesso.</small></div>
@@ -1564,7 +1596,7 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
         </section>}
         <form className="client-profile-edit-form" onSubmit={save}>
           {editing ? <div className="client-profile-grid client-profile-grid-edit">
-            <label>Nome completo<input required maxLength={100} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
+            <label>Nome completo e sobrenome<input required maxLength={100} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
             <label>E-mail<input required type="email" maxLength={100} value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
             <label>Telefone / WhatsApp<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} /></label>
             <label>Organização<input required maxLength={100} value={form.organizacao} onChange={event => setForm({ ...form, organizacao: event.target.value })} /><small>A alteração vale só para seu cadastro. Organizações novas ficam pendentes de classificação.</small></label>
