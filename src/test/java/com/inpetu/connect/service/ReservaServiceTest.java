@@ -1,6 +1,7 @@
 package com.inpetu.connect.service;
 
 import com.inpetu.connect.dto.ReservaRequest;
+import com.inpetu.connect.dto.ReservaEdicaoRequest;
 import com.inpetu.connect.model.LogAuditoria;
 import com.inpetu.connect.model.Espaco;
 import com.inpetu.connect.model.Reserva;
@@ -16,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
@@ -39,6 +41,34 @@ class ReservaServiceTest {
     NotificacaoService notificacoes;
     @InjectMocks
     ReservaService service;
+
+    @Test
+    void rejeitaEdicaoComInicioNoPassadoNoFusoDeSaoPaulo() {
+        LocalDate ontemEmSaoPaulo = LocalDate.now(ZoneId.of("America/Sao_Paulo")).minusDays(1);
+        ReservaEdicaoRequest request = new ReservaEdicaoRequest("Reunião", "Teste", ontemEmSaoPaulo,
+                LocalTime.of(10, 0), LocalTime.of(11, 0), 2, null);
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.editar(14, request, "equipe@inpetu.ufsc.br"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        assertEquals("Não é possível editar a reserva para uma data ou horário que já passou.", error.getReason());
+        verifyNoInteractions(reservas, espacos, usuarios, cancelamentos, auditoria, notificacoes);
+    }
+
+    @Test
+    void rejeitaCriacaoComInicioNoPassadoNoFusoDeSaoPaulo() {
+        LocalDate ontemEmSaoPaulo = LocalDate.now(ZoneId.of("America/Sao_Paulo")).minusDays(1);
+        ReservaRequest request = new ReservaRequest("Reunião", "Teste", ontemEmSaoPaulo,
+                LocalTime.of(10, 0), LocalTime.of(11, 0), 2, null);
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.criar(request, "visitante@exemplo.com"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        assertEquals("A data e o horário de início não podem estar no passado.", error.getReason());
+        verifyNoInteractions(reservas, espacos, usuarios, cancelamentos, auditoria, notificacoes);
+    }
 
     @Test
     void rejeitaReservaComSobreposicaoComConflito409() {
@@ -112,11 +142,12 @@ class ReservaServiceTest {
                 .thenReturn(false);
         when(reservas.save(any(Reserva.class))).thenAnswer(invocation -> invocation.getArgument(0));
         ReservaRequest request = new ReservaRequest("Oficina", "Encontro de teste", LocalDate.now().plusDays(1),
-                LocalTime.of(9, 0), LocalTime.of(10, 0), 2, null);
+                LocalTime.of(9, 0), LocalTime.of(10, 0), 2, null, "48999999999");
 
         Reserva reserva = service.criar(request, "visitante@exemplo.com");
 
         assertEquals("Pendente", reserva.getStatusReserva());
+        assertEquals("+5548999999999", reserva.getTelefoneContato());
         verify(reservas).save(reserva);
         verify(notificacoes).enviar(eq(List.of(administrador)), eq("RESERVA_CRIADA"),
                 eq("Solicitação de reserva recebida"), anyString());
@@ -212,7 +243,7 @@ class ReservaServiceTest {
         usuario.setNomeCompleto("Joana Silva");
         usuario.setIdPersona(2);
         usuario.setAtivo(true);
-        YearMonth mes = YearMonth.now();
+        YearMonth mes = YearMonth.from(LocalDate.now(ZoneId.of("America/Sao_Paulo"))).plusMonths(1);
         List<Reserva> existentes = List.of(reservaComCincoHoras(40), reservaComCincoHoras(41),
                 reservaComCincoHoras(42), reservaComCincoHoras(43), reservaComCincoHoras(44),
                 reservaComCincoHoras(45));
@@ -233,8 +264,12 @@ class ReservaServiceTest {
 
         assertTrue(reserva.getExcedeCota());
         assertEquals("Pendente", reserva.getStatusReserva());
+        ArgumentCaptor<String> notificationMessage = ArgumentCaptor.forClass(String.class);
         verify(notificacoes).enviar(anyList(), eq("COTA_EXCEDIDA"), eq("Reserva excede a cota mensal"),
-                contains("cota mensal de 30.0 horas"));
+                notificationMessage.capture());
+        assertTrue(notificationMessage.getValue().length() <= 255);
+        assertTrue(notificationMessage.getValue().contains("cota mensal de 30.0 horas"));
+        assertTrue(notificationMessage.getValue().contains("Negociação manual necessária"));
         ArgumentCaptor<LogAuditoria> log = ArgumentCaptor.forClass(LogAuditoria.class);
         verify(auditoria).save(log.capture());
         assertEquals("CRIACAO", log.getValue().getAcao());
@@ -444,8 +479,9 @@ class ReservaServiceTest {
         when(reservas.findById(14)).thenReturn(Optional.of(reserva));
         when(reservas.save(any(Reserva.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.cancelar(14, "Mudança de agenda", "visitante@exemplo.com");
+        Reserva atualizada = service.cancelar(14, "Mudança de agenda", "visitante@exemplo.com");
 
+        assertSame(reserva, atualizada);
         assertEquals("Cancelada", reserva.getStatusReserva());
         ArgumentCaptor<com.inpetu.connect.model.LogAuditoria> logCaptor =
                 ArgumentCaptor.forClass(com.inpetu.connect.model.LogAuditoria.class);

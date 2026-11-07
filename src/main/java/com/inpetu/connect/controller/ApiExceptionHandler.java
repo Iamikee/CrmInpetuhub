@@ -1,14 +1,17 @@
 package com.inpetu.connect.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -16,6 +19,21 @@ import java.util.Map;
 @RestControllerAdvice
 public class ApiExceptionHandler {
     private static final Logger logger = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ApiErrorResponse> handleResponseStatusException(
+            ResponseStatusException exception, HttpServletRequest request) {
+        HttpStatusCode status = exception.getStatusCode();
+        HttpStatus httpStatus = HttpStatus.resolve(status.value());
+        String error = httpStatus == null ? status.toString() : httpStatus.getReasonPhrase();
+        String message = exception.getReason();
+        if (message == null || message.isBlank()) {
+            message = error;
+        }
+
+        return ResponseEntity.status(status).body(new ApiErrorResponse(
+                status.value(), error, message, request.getRequestURI()));
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException exception) {
@@ -51,5 +69,8 @@ public class ApiExceptionHandler {
             case "Pattern" -> "O formato informado é inválido.";
             default -> message == null ? "Valor inválido." : message;
         };
+    }
+
+    public record ApiErrorResponse(int status, String error, String message, String path) {
     }
 }

@@ -1,5 +1,6 @@
 package com.inpetu.connect.dto;
 
+import com.inpetu.connect.validation.TelefoneBrasileiro;
 import jakarta.validation.constraints.*;
 
 public record CadastroPublicoRequest(
@@ -7,8 +8,7 @@ public record CadastroPublicoRequest(
     @Pattern(regexp = "^\\s*\\S+(?:\\s+\\S+)+\\s*$", message = "Informe nome e sobrenome.")
     String nomeCompleto,
     @NotBlank @Email @Size(max = 100) String email,
-    @Size(max = 20) @Pattern(regexp = "^$|\\(\\d{2}\\) 9\\d{4}-\\d{4}",
-        message = "Informe um celular no formato (48) 99999-9999.") String telefone,
+    @TelefoneBrasileiro String telefone,
     @NotBlank @Size(max = 100) String organizacao,
     @NotBlank @Size(max = 100) String cargoVinculo,
     @NotBlank @Size(min = 8, max = 64) String senha

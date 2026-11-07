@@ -4,6 +4,7 @@ import com.inpetu.connect.dto.ReservaRequest;
 import com.inpetu.connect.dto.ReservaEdicaoRequest;
 import com.inpetu.connect.model.*;
 import com.inpetu.connect.repository.*;
+import com.inpetu.connect.util.TelefoneUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -18,6 +20,7 @@ import java.util.List;
 
 @Service
 public class ReservaService {
+    private static final ZoneId ZONA_INPETU = ZoneId.of("America/Sao_Paulo");
     private final ReservaRepository reservas;
     private final EspacoRepository espacos;
     private final UsuarioRepository usuarios;
@@ -38,6 +41,7 @@ public class ReservaService {
 
     @Transactional
     public Reserva criar(ReservaRequest request, String email) {
+        validarInicioFuturo(request.dataReserva(), request.horarioInicio());
         if (!request.horarioFim().isAfter(request.horarioInicio()))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O horário final deve ser posterior ao inicial.");
         Espaco espaco = espacos.bloquearParaReserva(request.idEspaco())
@@ -77,6 +81,7 @@ public class ReservaService {
         reserva.setHorarioFim(request.horarioFim());
         reserva.setIdEspaco(espaco.getIdEspaco());
         reserva.setQuantidadeParticipantes(request.quantidadeParticipantes());
+        reserva.setTelefoneContato(TelefoneUtils.normalizarE164(request.telefoneContato()));
         reserva.setIdSolicitante(solicitante.getIdUsuario());
         reserva.setDataSolicitacao(solicitadaEm);
         double horasPedido = horas(request.horarioInicio(), request.horarioFim());
@@ -103,6 +108,8 @@ public class ReservaService {
 
     @Transactional
     public Reserva editar(Integer id, ReservaEdicaoRequest request, String email) {
+        validarInicioFuturo(request.dataReserva(), request.horarioInicio(),
+                "Não é possível editar a reserva para uma data ou horário que já passou.");
         if (!request.horarioFim().isAfter(request.horarioInicio()))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O horário final deve ser posterior ao inicial.");
         Reserva reserva = reservas.findById(id)
@@ -136,6 +143,7 @@ public class ReservaService {
         reserva.setHorarioFim(request.horarioFim());
         reserva.setIdEspaco(espaco.getIdEspaco());
         reserva.setQuantidadeParticipantes(request.quantidadeParticipantes());
+        reserva.setTelefoneContato(TelefoneUtils.normalizarE164(request.telefoneContato()));
         reserva.setExcedeCota(excedeCota);
         if (excedeCota) {
             reserva.setStatusReserva("Pendente");
@@ -152,8 +160,18 @@ public class ReservaService {
         return atualizada;
     }
 
+    private void validarInicioFuturo(LocalDate data, LocalTime horario) {
+        validarInicioFuturo(data, horario, "A data e o horário de início não podem estar no passado.");
+    }
+
+    private void validarInicioFuturo(LocalDate data, LocalTime horario, String mensagem) {
+        if (LocalDateTime.of(data, horario).isBefore(LocalDateTime.now(ZONA_INPETU))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, mensagem);
+        }
+    }
+
     @Transactional
-    public void cancelar(Integer id, String motivo, String email) {
+    public Reserva cancelar(Integer id, String motivo, String email) {
         if (motivo == null || motivo.isBlank())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O motivo do cancelamento é obrigatório.");
         Usuario responsavel = usuarioAtivo(email);
@@ -164,7 +182,7 @@ public class ReservaService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você não pode cancelar esta reserva.");
         if ("Cancelada".equals(reserva.getStatusReserva()))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "A reserva já foi cancelada.");
-        long diasAntecedencia = ChronoUnit.DAYS.between(LocalDate.now(), reserva.getDataReserva());
+        long diasAntecedencia = ChronoUnit.DAYS.between(LocalDate.now(ZONA_INPETU), reserva.getDataReserva());
         if (!equipe && diasAntecedencia < 15)
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "O cancelamento pelo solicitante deve ser feito com pelo menos 15 dias de antecedência. Procure a equipe para solicitar uma exceção.");
@@ -185,6 +203,7 @@ public class ReservaService {
                 "A reserva \"" + reserva.getTituloEvento() + "\" para " + reserva.getDataReserva()
                         + " (" + reserva.getHorarioInicio() + "–" + reserva.getHorarioFim()
                         + ") foi cancelada. Motivo: " + motivo.trim());
+        return reserva;
     }
 
     @Transactional
@@ -294,13 +313,11 @@ public class ReservaService {
     private void notificarExcedente(Reserva reserva, Usuario solicitante, double limite, double horasPedido) {
         YearMonth mes = YearMonth.from(reserva.getDataReserva());
         double total = horasReservadas(solicitante.getIdUsuario(), reserva.getDataReserva(), null);
-        String mensagem = "A reserva \"" + reserva.getTituloEvento() + "\" do solicitante "
-                + solicitante.getNomeCompleto() + " (persona P" + solicitante.getIdPersona()
-                + ") excede a cota mensal de " + limite + " horas. Total solicitado no mês: "
+        String mensagem = "A reserva excede a cota mensal de " + limite + " horas. Total no mês: "
                 + String.format(java.util.Locale.forLanguageTag("pt-BR"), "%.1f", total)
-                + " h (inclui " + String.format(java.util.Locale.forLanguageTag("pt-BR"), "%.1f", horasPedido)
-                + " h nesta solicitação). A equipe deve negociar com o solicitante antes da aprovação. Período: "
-                + mes + ".";
+                + " h; nesta solicitação: "
+                + String.format(java.util.Locale.forLanguageTag("pt-BR"), "%.1f", horasPedido)
+                + " h. Negociação manual necessária antes da aprovação. Período: " + mes + ".";
         notificacoes.enviar(usuarios.findAllByAtivoTrueAndIdPerfilLessThan(4), "COTA_EXCEDIDA",
                 "Reserva excede a cota mensal", mensagem);
     }

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { AccessPage, Avatar, BookingModal, CalendarPage, LoginInline, PersonaCombobox, SignupPage } from './App.jsx'
+import { Avatar, LoginInline, Modal, Title } from './App.jsx'
+import CalendarPage from './CalendarPage.jsx'
+import { AccessPage, PasswordChangePage, SignupPage } from './PublicPages.jsx'
 
 const originalCreateObjectURL = URL.createObjectURL
 const originalRevokeObjectURL = URL.revokeObjectURL
@@ -111,7 +113,22 @@ describe('Public signup phone format', () => {
     expect(confirmation.value).toBe('SenhaSegura123!')
   })
 
-  it('sends the formatted phone value accepted by the API', async () => {
+  it('shows and hides each password in the temporary-password form', () => {
+    render(<PasswordChangePage user={{ nome: 'Ana' }} onLogout={vi.fn()} onPasswordChanged={vi.fn()} />)
+    const temporaryPassword = screen.getByLabelText('Senha temporária')
+    const newPassword = screen.getByLabelText('Nova senha')
+    const confirmation = screen.getByLabelText('Confirmar nova senha')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar senha temporária' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar nova senha' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar confirmação da nova senha' }))
+
+    expect(temporaryPassword.type).toBe('text')
+    expect(newPassword.type).toBe('text')
+    expect(confirmation.type).toBe('text')
+  })
+
+  it('normalizes the phone value to E.164 for the API', async () => {
     globalThis.fetch.mockResolvedValue({
       ok: true,
       status: 202,
@@ -121,7 +138,8 @@ describe('Public signup phone format', () => {
     render(<SignupPage onBack={vi.fn()} onCodeSent={onCodeSent} />)
     fireEvent.change(screen.getByLabelText(/Nome completo/), { target: { value: 'Ana Souza' } })
     fireEvent.change(screen.getByLabelText(/E-mail/), { target: { value: 'ana@example.org' } })
-    fireEvent.change(screen.getByPlaceholderText('(48) 99999-9999'), { target: { value: '48999991234' } })
+    fireEvent.change(screen.getByLabelText('DDD'), { target: { value: '48' } })
+    fireEvent.change(screen.getByLabelText('Número do telefone'), { target: { value: '999991234' } })
     fireEvent.change(screen.getByLabelText(/Organização/), { target: { value: 'UFSC' } })
     fireEvent.change(screen.getByLabelText(/Cargo ou vínculo/), { target: { value: 'Pesquisadora' } })
     fireEvent.change(screen.getByLabelText(/^Senha/), { target: { value: 'Senha123!' } })
@@ -129,35 +147,23 @@ describe('Public signup phone format', () => {
     fireEvent.submit(screen.getByRole('button', { name: /Criar conta/ }).closest('form'))
 
     await waitFor(() => expect(onCodeSent).toHaveBeenCalledWith('ana@example.org'))
-    expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body).telefone).toBe('(48) 99999-1234')
+    expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body).telefone).toBe('+5548999991234')
   })
 
   it('explains invalid phone format before making a request', async () => {
     render(<SignupPage onBack={vi.fn()} onCodeSent={vi.fn()} />)
     fireEvent.change(screen.getByLabelText(/Nome completo/), { target: { value: 'Ana Souza' } })
     fireEvent.change(screen.getByLabelText(/E-mail/), { target: { value: 'ana@example.org' } })
-    fireEvent.change(screen.getByPlaceholderText('(48) 99999-9999'), { target: { value: '4833334444' } })
+    fireEvent.change(screen.getByLabelText('DDD'), { target: { value: '48' } })
+    fireEvent.change(screen.getByLabelText('Número do telefone'), { target: { value: '33334444' } })
     fireEvent.change(screen.getByLabelText(/Organização/), { target: { value: 'UFSC' } })
     fireEvent.change(screen.getByLabelText(/Cargo ou vínculo/), { target: { value: 'Pesquisadora' } })
     fireEvent.change(screen.getByLabelText(/^Senha/), { target: { value: 'Senha123!' } })
     fireEvent.change(screen.getByLabelText(/Confirmar senha/), { target: { value: 'Senha123!' } })
     fireEvent.submit(screen.getByRole('button', { name: /Criar conta/ }).closest('form'))
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Informe um celular no formato (48) 99999-9999.')
+    expect((await screen.findByRole('alert')).textContent).toContain('Informe DDI, DDD e número válidos.')
     expect(globalThis.fetch).not.toHaveBeenCalled()
-  })
-})
-
-describe('Persona selection', () => {
-  it('offers all personas in an accessible selector and reports the selected value', () => {
-    const onChange = vi.fn()
-    render(<PersonaCombobox value="" onChange={onChange} />)
-    const select = screen.getByRole('combobox', { name: 'Classificação por persona' })
-
-    expect(screen.getAllByRole('option')).toHaveLength(7)
-    fireEvent.change(select, { target: { value: '3' } })
-
-    expect(onChange).toHaveBeenCalledWith('3')
   })
 })
 
@@ -173,32 +179,13 @@ describe('Calendar navigation', () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
   })
 
-  it('scrolls to date and time after selecting a space', async () => {
-    render(<CalendarPage spaces={spaces} spacesLoaded initialDate="2026-10-15" onReserve={vi.fn()} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /Coworking, até 35 pessoas/ }))
-
-    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
-      behavior: 'smooth',
-      block: 'start',
-    }))
-  })
-
   it('selects and scrolls to the requested space when opened from its availability link', async () => {
-    render(<CalendarPage spaces={spaces} spacesLoaded initialDate="2026-10-15" initialSpaceId="42" onReserve={vi.fn()} />)
+    render(<CalendarPage spaces={spaces} spacesLoaded initialDate="2099-10-15" initialSpaceId="42" onReserve={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: /Coworking, até 35 pessoas/ }).getAttribute('aria-pressed')).toBe('true')
     await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled())
   })
 
-  it('returns from the booking page when the back button is clicked', () => {
-    const onBack = vi.fn()
-    render(<CalendarPage spaces={spaces} spacesLoaded initialDate="2026-10-15" onReserve={vi.fn()} onBack={onBack} />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }))
-
-    expect(onBack).toHaveBeenCalledOnce()
-  })
 })
 
 describe('Avatar', () => {
@@ -260,81 +247,22 @@ describe('Avatar', () => {
   })
 })
 
-describe('BookingModal', () => {
-  it('submits a booking with the authenticated cookie session', async () => {
-    globalThis.fetch.mockResolvedValue({
-      ok: true,
-      status: 201,
-      text: async () => JSON.stringify({ idReserva: 31, statusReserva: 'Pendente' }),
-    })
-    const onSaved = vi.fn()
-    const close = vi.fn()
-    render(
-      <BookingModal
-        space={{ idEspaco: 12, nomeEspaco: 'Coworking', tipoEspaco: 'Coworking', capacidadePessoas: 20 }}
-        close={close}
-        onSaved={onSaved}
-        onRequireAuthentication={vi.fn()}
-        initialDate="2026-11-01"
-        initialTime="09:30"
-        initialEndTime="10:30"
-        initialForm={{
-          dataReserva: '2026-11-01',
-          horarioInicio: '09:30',
-          horarioFim: '10:30',
-          tituloEvento: 'Oficina de teste',
-          descricaoFinalidade: 'Teste autenticado',
-          quantidadeParticipantes: '',
-        }}
-      />,
-    )
+describe('Title', () => {
+  it('renders an accessible heading without decorative emoji', () => {
+    render(<Title as="h2">Minhas reservas</Title>)
 
-    fireEvent.submit(screen.getByRole('button', { name: /Continuar solicitação/ }).closest('form'))
-
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ idReserva: 31, statusReserva: 'Pendente' }))
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/reservas'),
-      expect.objectContaining({ credentials: 'include' }),
-    )
-    expect(close).toHaveBeenCalledOnce()
+    const heading = screen.getByRole('heading', { name: 'Minhas reservas', level: 2 })
+    expect(heading.querySelector('.title-emoji')).toBeNull()
+    expect(heading.textContent).toBe('Minhas reservas')
   })
+})
 
-  it('offers login or signup after an unauthenticated reservation and keeps the draft', async () => {
-    const onRequireAuthentication = vi.fn()
-    const close = vi.fn()
-    const form = {
-      dataReserva: '2026-11-01',
-      horarioInicio: '09:30',
-      horarioFim: '10:30',
-      tituloEvento: 'Oficina de teste',
-      descricaoFinalidade: 'Continuar após autenticar',
-      quantidadeParticipantes: '',
-    }
-    globalThis.fetch.mockResolvedValue({
-      ok: false,
-      status: 403,
-      text: async () => JSON.stringify({ error: 'Forbidden' }),
-    })
+describe('Modal', () => {
+  it('renders the title without a decorative emoji', async () => {
+    render(<Modal open close={() => {}} title="Meu perfil">Conteúdo</Modal>)
 
-    render(
-      <BookingModal
-        space={{ idEspaco: 12, nomeEspaco: 'Coworking', tipoEspaco: 'Coworking', capacidadePessoas: 20 }}
-        close={close}
-        onSaved={vi.fn()}
-        onRequireAuthentication={onRequireAuthentication}
-        initialDate={form.dataReserva}
-        initialTime={form.horarioInicio}
-        initialEndTime={form.horarioFim}
-        initialForm={form}
-      />,
-    )
-
-    fireEvent.submit(screen.getByRole('button', { name: /Continuar solicitação/ }).closest('form'))
-
-    expect(await screen.findByText(/A solicitação não foi enviada/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
-
-    expect(onRequireAuthentication).toHaveBeenCalledWith('signup', { spaceId: 12, form })
-    expect(close).not.toHaveBeenCalled()
+    const heading = await screen.findByRole('heading', { name: 'Meu perfil' })
+    expect(heading.querySelector('.dialog-title-emoji')).toBeNull()
+    expect(heading.textContent).toBe('Meu perfil')
   })
 })

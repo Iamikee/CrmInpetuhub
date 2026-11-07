@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.beans.factory.annotation.Value;
 import jakarta.servlet.http.HttpServletResponse;
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
@@ -48,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.security.SecureRandom;
 import com.inpetu.connect.dto.PersonaResumo;
+import com.inpetu.connect.util.TelefoneUtils;
 
 @RestController @RequestMapping("/api/v1/usuarios")
 public class UsuarioController {
@@ -62,6 +64,8 @@ public class UsuarioController {
     private final UsuarioFotoRepository fotos;
     private final JwtService jwt;
     private final UserDetailsService userDetailsService;
+    @Value("${app.cookie.secure:true}")
+    private boolean cookieSecure = true;
     public UsuarioController(UsuarioRepository usuarios, LogAuditoriaRepository auditoria,
             OrganizacaoRepository organizacoes, DuvidaAtendimentoRepository duvidas, PasswordEncoder passwordEncoder,
             UsuarioFotoRepository fotos, JwtService jwt, UserDetailsService userDetailsService) {
@@ -100,7 +104,7 @@ public class UsuarioController {
     public Map<String, Object> atualizarMeuPerfil(@Valid @RequestBody PerfilUsuarioRequest request, Authentication auth) {
         Usuario usuario = usuarioAutenticado(auth);
         usuario.setNomeCompleto(request.nomeCompleto().trim());
-        usuario.setTelefone(request.telefone() == null || request.telefone().isBlank() ? null : request.telefone().trim());
+        usuario.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
         usuario.setCargoVinculo(request.cargoVinculo().trim());
         if (Integer.valueOf(4).equals(usuario.getIdPerfil()) && usuario.getIdOrganizacao() != null) {
             Organizacao atual = organizacoes.findById(usuario.getIdOrganizacao())
@@ -232,7 +236,7 @@ public class UsuarioController {
         var principal = userDetailsService.loadUserByUsername(usuario.getEmail());
         String token = jwt.gerar(principal, usuario.getVersaoToken());
         response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from("inpetu-token", token)
-                .httpOnly(true).secure(true).sameSite("Strict").path("/api/v1")
+                .httpOnly(true).secure(cookieSecure).sameSite("Strict").path("/api/v1")
                 .maxAge(java.time.Duration.ofMillis(jwt.expirationMs())).build().toString());
         return ResponseEntity.noContent().build();
     }
@@ -308,13 +312,14 @@ public class UsuarioController {
         Usuario usuario = new Usuario();
         usuario.setNomeCompleto(request.nomeCompleto().trim());
         usuario.setEmail(email);
-        usuario.setTelefone(request.telefone() == null ? null : request.telefone().trim());
+        usuario.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
         usuario.setCargoVinculo(request.cargoVinculo().trim());
         usuario.setIdPerfil(4);
         usuario.setSenhaHash(passwordEncoder.encode(request.senha()));
         usuario.setIdOrganizacao(organizacao.getIdOrganizacao());
         usuario.setIdPersona(null);
         usuario.setAtivo(true);
+        usuario.setSenhaTemporaria(true);
         Usuario criado = usuarios.save(usuario);
         registrar("usuario", criado.getIdUsuario(), "CADASTRO_CRIADO",
             "Cadastro criado pela equipe para " + organizacao.getNomeOrganizacao(), auth.getName());
@@ -371,8 +376,7 @@ public class UsuarioController {
         String emailAnterior = usuario.getEmail();
         usuario.setNomeCompleto(request.nomeCompleto().trim());
         usuario.setEmail(email);
-        usuario.setTelefone(request.telefone() == null || request.telefone().isBlank()
-                ? null : request.telefone().trim());
+        usuario.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
         usuario.setCargoVinculo(request.cargoVinculo().trim());
         organizacao.setNomeOrganizacao(nomeOrganizacao);
         boolean emailAlterado = !emailAnterior.equalsIgnoreCase(email);

@@ -34,6 +34,7 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -49,6 +50,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -104,12 +106,20 @@ class CadastroConfirmacaoFluxoTest {
             .andExpect(status().isOk())
             .andExpect(forwardedUrl("/index.html"));
 
+        for (String route : List.of(
+                "/meu-portal", "/minhas-reservas", "/agendar", "/login", "/cadastro", "/contato")) {
+            mvc.perform(get(route))
+                .andExpect(status().isOk())
+                .andExpect(forwardedUrl("/index.html"));
+        }
+
         mvc.perform(get("/index.html"))
             .andExpect(status().isOk())
             .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"root\"")));
 
         mvc.perform(get("/api/v1/auth/session"))
-            .andExpect(status().isForbidden());
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.codigo").value("SESSAO_EXPIRADA"));
     }
 
     @Test
