@@ -108,8 +108,13 @@ describe('CRM responsive lists', () => {
       return { ok: true, status: 200, text: async () => JSON.stringify(data) }
     }))
 
-    render(<TestCrm />)
+    const { container } = render(<TestCrm />)
     const menuButton = await screen.findByRole('button', { name: 'Alternar menu lateral' })
+    const mobileLogo = container.querySelector('.crm-mobile-logo')
+    expect(mobileLogo).toBeTruthy()
+    expect(mobileLogo.getAttribute('aria-label')).toBe('Ir para o início do site')
+    expect(mobileLogo.getAttribute('href')).toBe('/?view=home')
+    expect(within(mobileLogo).getByRole('img', { name: 'InPETU hub' })).toBeTruthy()
     fireEvent.click(menuButton)
 
     const sidebar = await screen.findByRole('dialog', { name: 'Navegação do painel' })

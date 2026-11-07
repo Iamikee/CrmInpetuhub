@@ -70,7 +70,7 @@ describe('notification center drawer', () => {
       throw new Error(`Unexpected request: ${String(url)}`)
     }))
 
-    render(<NotificationCenter user={{ idUsuario: 1 }} />)
+    const { rerender } = render(<NotificationCenter user={{ idUsuario: 1 }} routeKey="overview" />)
     const trigger = await screen.findByRole('button', { name: 'Notificações' })
 
     fireEvent.click(trigger)
@@ -82,6 +82,12 @@ describe('notification center drawer', () => {
     fireEvent.click(trigger)
     await screen.findByRole('dialog', { name: 'Notificações' })
     fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+
+    fireEvent.click(trigger)
+    await screen.findByRole('dialog', { name: 'Notificações' })
+    rerender(<NotificationCenter user={{ idUsuario: 1 }} routeKey="reservas" />)
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await waitFor(() => expect(document.activeElement).toBe(trigger))
   })

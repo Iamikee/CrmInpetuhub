@@ -1,20 +1,19 @@
 export const phoneCountryCodes = [
   { code: '55', country: 'Brasil', areaCodeLength: 2 },
-  { code: '1', country: 'Estados Unidos e Canadá', areaCodeLength: 3 },
-  { code: '54', country: 'Argentina', areaCodeLength: 2 },
-  { code: '56', country: 'Chile', areaCodeLength: 1 },
-  { code: '57', country: 'Colômbia', areaCodeLength: 1 },
-  { code: '52', country: 'México', areaCodeLength: 2 },
-  { code: '351', country: 'Portugal', areaCodeLength: 2 },
-  { code: '44', country: 'Reino Unido', areaCodeLength: 2 },
-  { code: '34', country: 'Espanha', areaCodeLength: 2 },
-  { code: '33', country: 'França', areaCodeLength: 1 },
-  { code: '49', country: 'Alemanha', areaCodeLength: 2 },
-  { code: '39', country: 'Itália', areaCodeLength: 2 },
-  { code: '61', country: 'Austrália', areaCodeLength: 1 },
-  { code: '81', country: 'Japão', areaCodeLength: 2 },
-  { code: '91', country: 'Índia', areaCodeLength: 2 },
 ]
+
+// DDDs assigned to Brazil under the national numbering plan.
+export const brazilianAreaCodes = new Set([
+  '11', '12', '13', '14', '15', '16', '17', '18', '19',
+  '21', '22', '24', '27', '28',
+  '31', '32', '33', '34', '35', '37', '38',
+  '41', '42', '43', '44', '45', '46', '47', '48', '49',
+  '51', '53', '54', '55',
+  '61', '62', '63', '64', '65', '66', '67', '68', '69',
+  '71', '73', '74', '75', '77', '79',
+  '81', '82', '83', '84', '85', '86', '87', '88', '89',
+  '91', '92', '93', '94', '95', '96', '97', '98', '99',
+])
 
 const countryCodesByLength = [...phoneCountryCodes].sort((left, right) => right.code.length - left.code.length)
 const onlyDigits = value => String(value || '').replace(/\D/g, '')
@@ -56,24 +55,28 @@ export function normalizePhoneToE164(value) {
   if (!digits) return ''
   if (raw.startsWith('+')) return `+${digits}`
   if (digits.startsWith('55') && digits.length > 11) return `+${digits}`
-  const nationalNumber = digits.startsWith('0') ? digits.slice(1) : digits
+  const withoutPrefixZero = digits.startsWith('0') ? digits.slice(1) : ''
+  const nationalNumber = withoutPrefixZero.length >= 11
+    && brazilianAreaCodes.has(withoutPrefixZero.slice(0, 2))
+    ? withoutPrefixZero
+    : digits
   return `+55${nationalNumber}`
 }
 
 export function hasPhoneInput(value) {
-  return onlyDigits(value).length > 0
+  return String(value || '').trim().length > 0
 }
 
 export function isValidPhoneNumber(value) {
   if (!hasPhoneInput(value)) return true
   const normalized = normalizePhoneToE164(value)
-  if (!/^\+[1-9]\d{7,14}$/.test(normalized)) return false
+  if (!/^\+55\d{11}$/.test(normalized)) return false
 
   const { countryCode, areaCode, subscriber } = parsePhoneParts(normalized)
-  if (!phoneCountryCodes.some(option => option.code === countryCode)) return false
-  const areaCodeLength = phoneCountryCodes.find(option => option.code === countryCode)?.areaCodeLength || 2
-  if (!new RegExp(`^[1-9]\\d{${areaCodeLength - 1}}$`).test(areaCode) || subscriber.length < 6) return false
-  return countryCode !== '55' || [8, 9].includes(subscriber.length)
+  return countryCode === '55'
+    && brazilianAreaCodes.has(areaCode)
+    && subscriber.length === 9
+    && subscriber.startsWith('9')
 }
 
 function formatSubscriber(subscriber) {

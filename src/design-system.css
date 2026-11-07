@@ -461,6 +461,24 @@ body {
   padding: 16px;
 }
 
+@media (max-width: 720px) {
+  .notification-layer[data-crm-notifications="true"] {
+    inset: var(--notification-mobile-top, 120px) 0 0;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .notification-layer[data-crm-notifications="true"] .notification-drawer {
+    box-sizing: border-box;
+    width: min(420px, calc(100vw - 24px));
+    height: min(520px, calc(100% - 16px));
+    max-height: calc(100% - 16px);
+    margin: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+  }
+}
+
 .notification-day {
   display: grid;
   min-width: 0;

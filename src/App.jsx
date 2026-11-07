@@ -4,7 +4,7 @@ import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOption
 import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, DoorOpen, Download, Eye, EyeOff, ExternalLink, FileText, Filter, GraduationCap, Home as HomeIcon, LayoutDashboard, ListChecks, LockKeyhole, Mail, MapPin, Menu as MenuIcon, MessageCircle, Moon, MoreHorizontal, Plus, Search, ShieldCheck, Sun, Users, X } from 'lucide-react'
 import { personas, personaQuotaLabel } from './personas.js'
 import { formatRelativeNotificationDate, groupNotificationsByDay, normalizeNotificationMessage, notificationDestination } from './notifications.js'
-import { formatPhoneNumber, formatPhoneSubscriber, hasPhoneInput, isValidPhoneNumber, normalizePhoneToE164, parsePhoneParts, phoneCountryCodes, phoneNumberFromParts } from './phone.js'
+import { brazilianAreaCodes, formatPhoneNumber, formatPhoneSubscriber, hasPhoneInput, isValidPhoneNumber, normalizePhoneToE164, parsePhoneParts, phoneCountryCodes, phoneNumberFromParts } from './phone.js'
 import { BRAND_LOGOS } from './brand.js'
 import { CountUp, Reveal, useScrollProgress } from './motion/index.js'
 import ErrorBoundary from './ErrorBoundary.jsx'
@@ -383,33 +383,56 @@ export function Button({ children, variant = 'primary', icon: Icon, className = 
 }
 export function PhoneInput({ value, onChange, id, className = '', disabled = false, 'aria-invalid': ariaInvalid, 'aria-describedby': ariaDescribedBy }) {
   const [parts, setParts] = useState(() => parsePhoneParts(value))
+  const [invalidTextInput, setInvalidTextInput] = useState(false)
   const numberInput = useRef(null)
   const lastEmittedValue = useRef(value)
   useEffect(() => {
     if (value === lastEmittedValue.current) return
     lastEmittedValue.current = value
     setParts(parsePhoneParts(value))
+    setInvalidTextInput(Boolean(value && /[^0-9()+\s.-]/.test(String(value))))
   }, [value])
   const hasValue = hasPhoneInput(phoneNumberFromParts(parts))
   const subscriberLength = parts.subscriber.length
   const areaCodeLength = phoneCountryCodes.find(option => option.code === parts.countryCode)?.areaCodeLength || 2
   const invalid = hasValue && (
-    !new RegExp(`^[1-9]\\d{${areaCodeLength - 1}}$`).test(parts.areaCode)
-    || (parts.countryCode === '55' ? ![8, 9].includes(subscriberLength) : subscriberLength < 6)
+    !brazilianAreaCodes.has(parts.areaCode)
+    || subscriberLength !== 9
+    || !parts.subscriber.startsWith('9')
     || !isValidPhoneNumber(phoneNumberFromParts(parts))
-  )
+  ) || invalidTextInput
   useEffect(() => {
     numberInput.current?.setCustomValidity(invalid ? 'Informe DDI, DDD e número válidos.' : '')
   }, [invalid])
   const options = phoneCountryCodes.some(option => option.code === parts.countryCode)
     ? phoneCountryCodes
     : [{ code: parts.countryCode, country: 'Outro' }, ...phoneCountryCodes]
-  function update(patch) {
-    const next = { ...parts, ...patch }
+  function update(next) {
     const nextValue = phoneNumberFromParts(next)
+    setInvalidTextInput(false)
     setParts(next)
     lastEmittedValue.current = nextValue
     onChange(nextValue)
+  }
+  function updateSubscriber(value, pasted = false) {
+    const raw = value.trim()
+    if (raw && /[^0-9()+\s.-]/.test(raw)) {
+      setInvalidTextInput(true)
+      lastEmittedValue.current = raw
+      onChange(raw)
+      return
+    }
+    setInvalidTextInput(false)
+    const digits = raw.replace(/\D/g, '')
+    const isCompleteNumber = raw.startsWith('+')
+      || /^\(\s*\d{1,3}\s*\)/.test(raw)
+      || digits.length > 10
+      || (pasted && parts.countryCode === '55' && !parts.areaCode && digits.length === 10)
+    if (isCompleteNumber) {
+      update(parsePhoneParts(raw))
+      return
+    }
+    update({ ...parts, subscriber: digits.slice(0, 10) })
   }
 
   return <div className={`phone-input${className ? ` ${className}` : ''}`} role="group" aria-label="Telefone">
@@ -419,7 +442,7 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       autoComplete="tel-country-code"
       value={parts.countryCode}
       disabled={disabled}
-      onChange={event => update({ countryCode: event.currentTarget.value })}
+      onChange={event => update({ ...parts, countryCode: event.currentTarget.value })}
     >
       {options.map(option => <option key={option.code} value={option.code}>{option.country} (+{option.code})</option>)}
     </select>
@@ -434,7 +457,7 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       disabled={disabled}
       aria-invalid={Boolean(ariaInvalid) || invalid}
       aria-describedby={ariaDescribedBy}
-      onChange={event => update({ areaCode: event.currentTarget.value.replace(/\D/g, '').slice(0, areaCodeLength) })}
+      onChange={event => update({ ...parts, areaCode: event.currentTarget.value.replace(/\D/g, '').slice(0, areaCodeLength) })}
     />
     <input
       ref={numberInput}
@@ -442,13 +465,19 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       type="tel"
       inputMode="numeric"
       autoComplete="tel-local"
-      maxLength={12}
+      maxLength={24}
       placeholder="Número"
       value={formatPhoneSubscriber(parts.subscriber)}
       disabled={disabled}
       aria-invalid={Boolean(ariaInvalid) || invalid}
       aria-describedby={ariaDescribedBy}
-      onChange={event => update({ subscriber: event.currentTarget.value.replace(/\D/g, '').slice(0, 10) })}
+      onChange={event => updateSubscriber(event.currentTarget.value)}
+      onPaste={event => {
+        const pasted = event.clipboardData.getData('text')
+        if (!pasted) return
+        event.preventDefault()
+        updateSubscriber(pasted, true)
+      }}
     />
     {invalid && <small className="phone-input-error" aria-live="polite">Informe DDI, DDD e número válidos.</small>}
   </div>
@@ -586,7 +615,7 @@ const notificationIcons = {
   RESERVA_CANCELADA: X,
   COTA_EXCEDIDA: CircleHelp,
 }
-export function NotificationCenter({ user, onNavigate }) {
+export function NotificationCenter({ user, onNavigate, routeKey }) {
   const [items, setItems] = useState([])
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
@@ -596,7 +625,14 @@ export function NotificationCenter({ user, onNavigate }) {
   const panelRef = useRef(null)
   const closeRef = useRef(null)
   const wasOpenRef = useRef(false)
+  const routeKeyRef = useRef(routeKey)
   const notificationId = useId()
+  const [mobileLayerTop, setMobileLayerTop] = useState(0)
+  useEffect(() => {
+    if (routeKeyRef.current === routeKey) return
+    routeKeyRef.current = routeKey
+    setOpen(false)
+  }, [routeKey])
   useEffect(() => {
     if (!user) {
       setItems([])
@@ -634,6 +670,14 @@ export function NotificationCenter({ user, onNavigate }) {
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     window.requestAnimationFrame(() => closeRef.current?.focus())
+    const crmTopbar = triggerRef.current?.closest('.crm-topbar')
+    const syncMobileLayerTop = () => {
+      setMobileLayerTop(crmTopbar && window.matchMedia('(max-width: 720px)').matches
+        ? Math.ceil(crmTopbar.getBoundingClientRect().bottom)
+        : 0)
+    }
+    syncMobileLayerTop()
+    window.addEventListener('resize', syncMobileLayerTop)
 
     function handleKeydown(event) {
       if (event.key === 'Escape') {
@@ -667,6 +711,7 @@ export function NotificationCenter({ user, onNavigate }) {
     return () => {
       document.body.style.overflow = previousOverflow
       document.removeEventListener('keydown', handleKeydown)
+      window.removeEventListener('resize', syncMobileLayerTop)
     }
   }, [open])
   async function markRead(item) {
@@ -700,11 +745,12 @@ export function NotificationCenter({ user, onNavigate }) {
     onNavigate?.(notificationDestination(item.tipo), item)
   }
 
+  const isCrmNotifications = Boolean(triggerRef.current?.closest('.crm-topbar'))
   return <div className="notification-center" ref={containerRef}>
     <button ref={triggerRef} type="button" className="notification-trigger" aria-label={`Notificações${unread ? `, ${unread} não lidas` : ''}`} aria-expanded={open} aria-controls={`notification-panel-${notificationId}`} onClick={() => setOpen(value => !value)}>
       <Bell size={19} />{unread > 0 && <span className="notification-count">{unread > 99 ? '99+' : unread}</span>}
     </button>
-    {open && createPortal(<div className="notification-layer" onClick={event => {
+    {open && createPortal(<div className="notification-layer" data-crm-notifications={isCrmNotifications ? 'true' : undefined} style={{ '--notification-mobile-top': `${mobileLayerTop}px` }} onClick={event => {
       if (event.target === event.currentTarget) setOpen(false)
     }}>
       <div className="notification-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />
