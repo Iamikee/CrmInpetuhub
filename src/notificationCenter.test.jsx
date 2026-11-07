@@ -2,6 +2,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NotificationCenter } from './App.jsx'
 
+function todayAtSaoPauloNoon() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date()).map(part => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day}T12:00:00`
+}
+
 describe('notification center drawer', () => {
   afterEach(() => {
     cleanup()
@@ -16,7 +26,7 @@ describe('notification center drawer', () => {
       titulo: 'Solicitação de reserva recebida',
       mensagem: message,
       lida: false,
-      dataHora: '2026-11-01T12:00:00',
+      dataHora: todayAtSaoPauloNoon(),
       statusEmail: 'DESATIVADO',
     }]
     const fetchMock = vi.fn(async (url, options = {}) => {
