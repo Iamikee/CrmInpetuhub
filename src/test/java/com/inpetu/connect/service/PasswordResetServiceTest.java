@@ -9,6 +9,9 @@ import com.inpetu.connect.repository.LogAuditoriaRepository;
 import com.inpetu.connect.repository.UsuarioRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -25,7 +28,9 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -35,6 +40,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(OutputCaptureExtension.class)
 class PasswordResetServiceTest {
     private static final String EMAIL = "person@example.test";
     private static final String OTP_SECRET = "test-otp-secret-with-at-least-32-chars";
@@ -71,6 +77,32 @@ class PasswordResetServiceTest {
         assertEquals(existing.getStatusCode(), unknown.getStatusCode());
         assertEquals(existing.getBody(), unknown.getBody());
         verify(codes).save(any(CodigoRecuperacaoSenha.class));
+        verify(emailSender, never()).sendPasswordResetCode(anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void logsResetCodeWhenDevProfileAndExplicitFlagAreEnabled(CapturedOutput output) {
+        when(users.findByEmailIgnoreCase(EMAIL)).thenReturn(Optional.of(user()));
+        org.springframework.mock.env.MockEnvironment environment =
+            new org.springframework.mock.env.MockEnvironment();
+        environment.setActiveProfiles("dev");
+        PasswordResetService devService = serviceWithDevCodeLogging(environment);
+
+        devService.solicitar(EMAIL, request);
+
+        assertTrue(output.getAll().contains("Código local de recuperação para"));
+        verify(emailSender, never()).sendPasswordResetCode(anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void doesNotLogResetCodeWhenDefaultProfileAndExplicitFlagAreEnabled(CapturedOutput output) {
+        when(users.findByEmailIgnoreCase(EMAIL)).thenReturn(Optional.of(user()));
+        PasswordResetService defaultProfileService = serviceWithDevCodeLogging(
+            new org.springframework.core.env.StandardEnvironment());
+
+        defaultProfileService.solicitar(EMAIL, request);
+
+        assertFalse(output.getAll().contains("Código local de recuperação para"));
         verify(emailSender, never()).sendPasswordResetCode(anyString(), anyString(), anyString(), anyInt());
     }
 
@@ -203,6 +235,13 @@ class PasswordResetServiceTest {
         request.setRemoteAddr("10.0.0.2");
         request.addHeader("X-Forwarded-For", forwardedFor);
         return request;
+    }
+
+    private PasswordResetService serviceWithDevCodeLogging(
+        org.springframework.core.env.Environment environment) {
+        return new PasswordResetService(
+            users, codes, events, audit, passwordEncoder, emailSender,
+            "", OTP_SECRET, RATE_SECRET, false, true, environment);
     }
 
     private Usuario user() {

@@ -38,3 +38,7 @@ uploads/mural/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+tsupgrader/
+*.patch
+/log.txt
