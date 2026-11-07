@@ -10,6 +10,7 @@ import com.inpetu.connect.repository.EventoCadastroRepository;
 import com.inpetu.connect.repository.OrganizacaoRepository;
 import com.inpetu.connect.repository.UsuarioRepository;
 import com.inpetu.connect.security.ClientIpResolver;
+import com.inpetu.connect.util.TelefoneUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,10 +55,12 @@ public class CadastroPublicoService {
     private final PasswordEncoder passwordEncoder;
     private final EmailDomainValidator emailDomainValidator;
     private final EmailSender emailSender;
+    private final boolean trustProxyHeaders;
     private final Set<String> trustedProxies;
     private final String rateLimitSecret;
     private final String otpSecret;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public CadastroPublicoService(UsuarioRepository usuarios,
                                  OrganizacaoRepository organizacoes,
                                  CadastroPendenteRepository pendentes,
@@ -65,6 +68,7 @@ public class CadastroPublicoService {
                                  PasswordEncoder passwordEncoder,
                                  EmailDomainValidator emailDomainValidator,
                                  EmailSender emailSender,
+                                 @Value("${app.trust-proxy-headers:false}") boolean trustProxyHeaders,
                                  @Value("${app.security.trusted-proxies:}") String trustedProxyConfig,
                                  @Value("${APP_RATE_LIMIT_SECRET:}") String rateLimitSecret,
                                  @Value("${OTP_SECRET:}") String otpSecret) {
@@ -78,14 +82,29 @@ public class CadastroPublicoService {
         this.passwordEncoder = passwordEncoder;
         this.emailDomainValidator = emailDomainValidator;
         this.emailSender = emailSender;
+        this.trustProxyHeaders = trustProxyHeaders;
         this.trustedProxies = ClientIpResolver.parseTrustedProxies(trustedProxyConfig);
         this.rateLimitSecret = rateLimitSecret;
         this.otpSecret = otpSecret;
     }
 
+    public CadastroPublicoService(UsuarioRepository usuarios,
+                                 OrganizacaoRepository organizacoes,
+                                 CadastroPendenteRepository pendentes,
+                                 EventoCadastroRepository eventos,
+                                 PasswordEncoder passwordEncoder,
+                                 EmailDomainValidator emailDomainValidator,
+                                 EmailSender emailSender,
+                                 String trustedProxyConfig,
+                                 String rateLimitSecret,
+                                 String otpSecret) {
+        this(usuarios, organizacoes, pendentes, eventos, passwordEncoder, emailDomainValidator,
+             emailSender, false, trustedProxyConfig, rateLimitSecret, otpSecret);
+    }
+
     public ResponseEntity<Map<String,String>> cadastrar(CadastroPublicoRequest request, HttpServletRequest servletRequest) {
         String email = normalizeEmail(request.email());
-        String ip = ClientIpResolver.resolve(servletRequest, trustedProxies);
+        String ip = ClientIpResolver.resolve(servletRequest, trustProxyHeaders, trustedProxies);
 
         try {
             emailDomainValidator.validate(email);
@@ -109,7 +128,7 @@ public class CadastroPublicoService {
         LocalDateTime now = LocalDateTime.now();
         if (existing.isPresent()) {
             pendente.setNomeCompleto(request.nomeCompleto().trim());
-            pendente.setTelefone(request.telefone());
+            pendente.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
             pendente.setCargoVinculo(request.cargoVinculo().trim());
             pendente.setNomeOrganizacao(request.organizacao().trim());
             pendente.setSenhaHash(passwordEncoder.encode(request.senha()));
@@ -123,7 +142,7 @@ public class CadastroPublicoService {
         } else {
             pendente.setNomeCompleto(request.nomeCompleto().trim());
             pendente.setEmail(email);
-            pendente.setTelefone(request.telefone());
+            pendente.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
             pendente.setCargoVinculo(request.cargoVinculo().trim());
             pendente.setNomeOrganizacao(request.organizacao().trim());
             pendente.setSenhaHash(passwordEncoder.encode(request.senha()));
@@ -182,7 +201,7 @@ public class CadastroPublicoService {
 
     public ResponseEntity<Map<String, String>> reenviarCodigo(String email, HttpServletRequest servletRequest) {
         String normalized = normalizeEmail(email);
-        String ip = ClientIpResolver.resolve(servletRequest, trustedProxies);
+        String ip = ClientIpResolver.resolve(servletRequest, trustProxyHeaders, trustedProxies);
         if (isOtpResendRateLimited(ip, normalized)) {
             recordEvent(EventoCadastro.TipoEvento.ENVIO, ip, normalized);
             return pendingAccepted();
@@ -342,7 +361,7 @@ public class CadastroPublicoService {
         Usuario usuario = new Usuario();
         usuario.setNomeCompleto(pendente.getNomeCompleto());
         usuario.setEmail(pendente.getEmail());
-        usuario.setTelefone(pendente.getTelefone());
+        usuario.setTelefone(TelefoneUtils.normalizarE164(pendente.getTelefone()));
         usuario.setCargoVinculo(pendente.getCargoVinculo());
         usuario.setSenhaHash(pendente.getSenhaHash());
         usuario.setIdPerfil(4);

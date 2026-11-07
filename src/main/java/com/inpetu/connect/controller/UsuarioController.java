@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.security.SecureRandom;
 import com.inpetu.connect.dto.PersonaResumo;
+import com.inpetu.connect.util.TelefoneUtils;
 
 @RestController @RequestMapping("/api/v1/usuarios")
 public class UsuarioController {
@@ -103,7 +104,7 @@ public class UsuarioController {
     public Map<String, Object> atualizarMeuPerfil(@Valid @RequestBody PerfilUsuarioRequest request, Authentication auth) {
         Usuario usuario = usuarioAutenticado(auth);
         usuario.setNomeCompleto(request.nomeCompleto().trim());
-        usuario.setTelefone(request.telefone() == null || request.telefone().isBlank() ? null : request.telefone().trim());
+        usuario.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
         usuario.setCargoVinculo(request.cargoVinculo().trim());
         if (Integer.valueOf(4).equals(usuario.getIdPerfil()) && usuario.getIdOrganizacao() != null) {
             Organizacao atual = organizacoes.findById(usuario.getIdOrganizacao())
@@ -320,7 +321,7 @@ public class UsuarioController {
         Usuario usuario = new Usuario();
         usuario.setNomeCompleto(request.nomeCompleto().trim());
         usuario.setEmail(email);
-        usuario.setTelefone(request.telefone() == null ? null : request.telefone().trim());
+        usuario.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
         usuario.setCargoVinculo(request.cargoVinculo().trim());
         usuario.setIdPerfil(4);
         usuario.setSenhaHash(passwordEncoder.encode(request.senha()));
@@ -384,8 +385,7 @@ public class UsuarioController {
         String emailAnterior = usuario.getEmail();
         usuario.setNomeCompleto(request.nomeCompleto().trim());
         usuario.setEmail(email);
-        usuario.setTelefone(request.telefone() == null || request.telefone().isBlank()
-                ? null : request.telefone().trim());
+        usuario.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
         usuario.setCargoVinculo(request.cargoVinculo().trim());
         organizacao.setNomeOrganizacao(nomeOrganizacao);
         boolean emailAlterado = !emailAnterior.equalsIgnoreCase(email);

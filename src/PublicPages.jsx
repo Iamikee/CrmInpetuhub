@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown, Filter, Mail, MapPin, MessageCircle, Plus, ShieldCheck } from 'lucide-react'
-import { Avatar, Button, Logo, Modal, PasswordInput, PasswordRecoveryForm, PhoneInput, Title, calendarDaysUntil, formatBrazilianPhone, localDateValue, maskEmail, request, reservationStatusClass, reservationStatusLabel, storeUser, uploadQuestion } from './App.jsx'
+import { Avatar, Button, Logo, Modal, PasswordInput, PasswordRecoveryForm, PhoneInput, Title, calendarDaysUntil, formatBrazilianPhone, hasPhoneInput, isValidPhoneNumber, localDateValue, maskEmail, normalizePhoneToE164, request, reservationStatusClass, reservationStatusLabel, storeUser, uploadQuestion } from './App.jsx'
 import { CountUp, Reveal, Stagger, StaggerItem } from './motion/index.js'
 
 export function AccessPage({ onLogin, onSignup }) {
@@ -19,7 +19,7 @@ export function AccessPage({ onLogin, onSignup }) {
     } catch (error) { setNotice(error.message) } finally { setBusy(false) }
   }
   return <main className="account-page">
-    <div className="account-brand"><Logo variant="institutionalLight" /></div><div className="account-page-heading"><Title as="h1">Acesso ao InPETU Connect</Title><p>Entre com seu e-mail e senha para acessar sua conta.</p></div>
+    <div className="account-brand"><Logo variant="institutionalLight" className="account-brand-logo-light" /><Logo variant="institutionalDark" className="account-brand-logo-dark" /></div><div className="account-page-heading"><Title as="h1">Acesso ao InPETU Connect</Title><p>Entre com seu e-mail e senha para acessar sua conta.</p></div>
     <section className="account-card" aria-label="Acessar sua conta">
       <p className="account-description">Acesse para acompanhar e gerenciar suas solicitações. O painel da equipe é exibido conforme as permissões da sua conta.</p>
       {recoveryOpen
@@ -49,9 +49,10 @@ export function SignupPage({ onBack, onCodeSent }) {
     event.preventDefault()
     setStatus('')
     if (form.senha !== form.confirmarSenha) return setStatus('As senhas não coincidem.')
+    if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) return setStatus('Informe DDI, DDD e número válidos.')
     try {
       const { confirmarSenha, ...cadastro } = form
-      await request('/usuarios/cadastro-publico', { method: 'POST', body: JSON.stringify(cadastro) })
+      await request('/usuarios/cadastro-publico', { method: 'POST', body: JSON.stringify({ ...cadastro, telefone: normalizePhoneToE164(form.telefone) }) })
       onCodeSent(form.email.trim().toLowerCase())
     } catch (error) {
       setStatus(error.message)
@@ -75,7 +76,7 @@ export function SignupPage({ onBack, onCodeSent }) {
     }
   }
   return <main className="account-page account-page-signup">
-    <div className="account-brand"><Logo variant="institutionalLight" /></div><div className="account-page-heading"><Title as="h1">Criar acesso público</Title><p>Cadastre-se para solicitar espaços e acompanhar seus agendamentos.</p></div>
+    <div className="account-brand"><Logo variant="institutionalLight" className="account-brand-logo-light" /><Logo variant="institutionalDark" className="account-brand-logo-dark" /></div><div className="account-page-heading"><Title as="h1">Criar acesso público</Title><p>Cadastre-se para solicitar espaços e acompanhar seus agendamentos.</p></div>
     <section className="account-card account-card-signup">
       <p className="account-description">Preencha seus dados. A classificação da organização é feita pela equipe InPETU.</p>
       <form className="form-stack account-form" onSubmit={submit}>
@@ -214,7 +215,7 @@ export function EmailVerificationPage({ email, onCorrectEmail, onConfirmed }) {
 
   const countdown = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`
   return <main className="account-page">
-    <div className="account-brand"><Logo variant="institutionalLight" /></div><div className="account-page-heading"><Title as="h1">Verifique seu e-mail</Title><p>Digite o código de 6 dígitos enviado para {email ? <strong>{maskEmail(email)}</strong> : 'seu endereço de e-mail'}.</p></div>
+    <div className="account-brand"><Logo variant="institutionalLight" className="account-brand-logo-light" /><Logo variant="institutionalDark" className="account-brand-logo-dark" /></div><div className="account-page-heading"><Title as="h1">Verifique seu e-mail</Title><p>Digite o código de 6 dígitos enviado para {email ? <strong>{maskEmail(email)}</strong> : 'seu endereço de e-mail'}.</p></div>
     <section className="account-card verification-card">
       {email ? <form className="form-stack account-form" onSubmit={submit}>
         <div className="verification-code" role="group" aria-label="Código de verificação de seis dígitos">
@@ -277,7 +278,7 @@ export function EmailConfirmationPage() {
   }, [])
 
   return <main className="account-page">
-    <div className="account-brand"><Logo variant="institutionalLight" /></div><div className="account-page-heading"><Title as="h1">Confirmação de cadastro</Title><p>Validação do seu acesso ao InPETU Connect.</p></div>
+    <div className="account-brand"><Logo variant="institutionalLight" className="account-brand-logo-light" /><Logo variant="institutionalDark" className="account-brand-logo-dark" /></div><div className="account-page-heading"><Title as="h1">Confirmação de cadastro</Title><p>Validação do seu acesso ao InPETU Connect.</p></div>
     <section className="account-card" aria-live="polite">
       <p className={`account-notice ${status.kind === 'success' ? 'account-notice-success' : status.kind === 'error' ? 'account-notice-error' : ''}`} role={status.kind === 'error' ? 'alert' : 'status'}>{status.message}</p>
       {status.kind !== 'loading' && <p className="account-signup"><a href="/">Voltar ao InPETU Connect</a></p>}
@@ -355,6 +356,6 @@ export function HelpPage() {
   const [file, setFile] = useState(null)
   const [status, setStatus] = useState('')
   const [progress, setProgress] = useState(0)
-  async function submit(event) { event.preventDefault(); setStatus(''); if (file && (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024)) return setStatus('Anexe PDF, PNG ou JPG de até 10 MB.'); try { if (file) await uploadQuestion(form, file, setProgress); else await request('/duvidas', { method: 'POST', body: JSON.stringify(form) }); setProgress(100); setStatus('Mensagem enviada. A equipe InPETU responderá pelo e-mail informado.'); setForm({ emailContato: '', telefoneContato: '', mensagemDuvida: '' }); setFile(null) } catch (error) { setStatus(error.message); setProgress(0) } }
+  async function submit(event) { event.preventDefault(); setStatus(''); if (hasPhoneInput(form.telefoneContato) && !isValidPhoneNumber(form.telefoneContato)) return setStatus('Informe DDI, DDD e número válidos.'); if (file && (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024)) return setStatus('Anexe PDF, PNG ou JPG de até 10 MB.'); const payload = { ...form, telefoneContato: normalizePhoneToE164(form.telefoneContato) }; try { if (file) await uploadQuestion(payload, file, setProgress); else await request('/duvidas', { method: 'POST', body: JSON.stringify(payload) }); setProgress(100); setStatus('Mensagem enviada. A equipe InPETU responderá pelo e-mail informado.'); setForm({ emailContato: '', telefoneContato: '', mensagemDuvida: '' }); setFile(null) } catch (error) { setStatus(error.message); setProgress(0) } }
   return <main className="inner-page help-page"><div className="help-intro"><Title as="h1">Vamos conversar<br /><em>sobre sua ideia?</em></Title><p>Tem dúvidas sobre os espaços, eventos ou quer descobrir como fazer parte do ecossistema? Escreva para a gente.</p><div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div><div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div></div><form className="help-form" onSubmit={submit}><div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>Retornamos em até dois dias úteis.</small></div></div><label>Seu e-mail<input required type="email" value={form.emailContato} onChange={e => setForm({ ...form, emailContato: e.target.value })} /></label><label>Telefone <span>(opcional)</span><PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm({ ...form, telefoneContato })} /></label><label>Sua mensagem<textarea required rows="5" maxLength="5000" value={form.mensagemDuvida} onChange={e => setForm({ ...form, mensagemDuvida: e.target.value })} placeholder="Como podemos ajudar?" /></label><label className="upload-box"><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><span className="upload-icon"><Plus size={19} /></span><span><strong>{file ? file.name : 'Adicionar anexo'}</strong><small>PDF, PNG ou JPG · até 10 MB</small></span><span className="upload-action">Escolher arquivo</span></label>{progress > 0 && <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>}{status && <p className={status.startsWith('Mensagem') ? 'success-note' : 'form-message'}>{status}</p>}<Button type="submit">Enviar mensagem <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Seus dados são protegidos pela política de privacidade UFSC.</p></form></main>
 }

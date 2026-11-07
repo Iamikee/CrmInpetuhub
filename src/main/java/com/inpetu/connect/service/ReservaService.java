@@ -4,6 +4,7 @@ import com.inpetu.connect.dto.ReservaRequest;
 import com.inpetu.connect.dto.ReservaEdicaoRequest;
 import com.inpetu.connect.model.*;
 import com.inpetu.connect.repository.*;
+import com.inpetu.connect.util.TelefoneUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +41,7 @@ public class ReservaService {
 
     @Transactional
     public Reserva criar(ReservaRequest request, String email) {
+        validarInicioFuturo(request.dataReserva(), request.horarioInicio());
         if (!request.horarioFim().isAfter(request.horarioInicio()))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O horário final deve ser posterior ao inicial.");
         Espaco espaco = espacos.bloquearParaReserva(request.idEspaco())
@@ -79,8 +81,7 @@ public class ReservaService {
         reserva.setHorarioFim(request.horarioFim());
         reserva.setIdEspaco(espaco.getIdEspaco());
         reserva.setQuantidadeParticipantes(request.quantidadeParticipantes());
-        reserva.setTelefoneContato(request.telefoneContato() == null || request.telefoneContato().isBlank()
-                ? null : request.telefoneContato().trim());
+        reserva.setTelefoneContato(TelefoneUtils.normalizarE164(request.telefoneContato()));
         reserva.setIdSolicitante(solicitante.getIdUsuario());
         reserva.setDataSolicitacao(solicitadaEm);
         double horasPedido = horas(request.horarioInicio(), request.horarioFim());
@@ -103,6 +104,8 @@ public class ReservaService {
 
     @Transactional
     public Reserva editar(Integer id, ReservaEdicaoRequest request, String email) {
+        validarInicioFuturo(request.dataReserva(), request.horarioInicio(),
+                "Não é possível editar a reserva para uma data ou horário que já passou.");
         if (!request.horarioFim().isAfter(request.horarioInicio()))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O horário final deve ser posterior ao inicial.");
         Reserva reserva = reservas.findById(id)
@@ -136,8 +139,7 @@ public class ReservaService {
         reserva.setHorarioFim(request.horarioFim());
         reserva.setIdEspaco(espaco.getIdEspaco());
         reserva.setQuantidadeParticipantes(request.quantidadeParticipantes());
-        reserva.setTelefoneContato(request.telefoneContato() == null || request.telefoneContato().isBlank()
-                ? null : request.telefoneContato().trim());
+        reserva.setTelefoneContato(TelefoneUtils.normalizarE164(request.telefoneContato()));
         reserva.setExcedeCota(excedeCota);
         if (excedeCota) {
             reserva.setStatusReserva("Pendente");
@@ -152,6 +154,16 @@ public class ReservaService {
                 responsavel.getIdUsuario(), alteradaEm);
         if (passouAExceder) notificarExcedente(atualizada, solicitante, limiteMensal, horasPedido);
         return atualizada;
+    }
+
+    private void validarInicioFuturo(LocalDate data, LocalTime horario) {
+        validarInicioFuturo(data, horario, "A data e o horário de início não podem estar no passado.");
+    }
+
+    private void validarInicioFuturo(LocalDate data, LocalTime horario, String mensagem) {
+        if (LocalDateTime.of(data, horario).isBefore(LocalDateTime.now(ZONA_INPETU))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, mensagem);
+        }
     }
 
     @Transactional

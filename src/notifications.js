@@ -1,4 +1,25 @@
 const relativeTimeFormatter = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' })
+const saoPauloDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Sao_Paulo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+function formatSaoPauloDate(timestamp) {
+  const parts = Object.fromEntries(saoPauloDateFormatter.formatToParts(timestamp)
+    .map(part => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+function saoPauloDateKey(value) {
+  const localDate = String(value ?? '').match(/^(\d{4}-\d{2}-\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/)
+  if (localDate) return localDate[1]
+
+  const timestamp = new Date(value)
+  if (!Number.isFinite(timestamp.getTime())) return ''
+  return formatSaoPauloDate(timestamp)
+}
 
 export function formatRelativeNotificationDate(value, now = Date.now()) {
   const timestamp = new Date(value).getTime()
@@ -18,6 +39,30 @@ export function formatRelativeNotificationDate(value, now = Date.now()) {
   const [unit, milliseconds] = units.find(([, , upperBound]) => Math.abs(difference) < upperBound)
   const roundedDifference = Math.round(difference / milliseconds)
   return relativeTimeFormatter.format(roundedDifference || Math.sign(difference), unit)
+}
+
+export function groupNotificationsByDay(items, now = Date.now()) {
+  const today = formatSaoPauloDate(new Date(now))
+  const yesterdayDate = new Date(`${today}T12:00:00Z`)
+  yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1)
+  const yesterday = yesterdayDate.toISOString().slice(0, 10)
+  const groups = [
+    { label: 'Hoje', date: today, items: [] },
+    { label: 'Ontem', date: yesterday, items: [] },
+    { label: 'Anteriores', date: null, items: [] },
+  ]
+
+  for (const item of items) {
+    const date = saoPauloDateKey(item.dataHora)
+    const group = groups.find(candidate => candidate.date === date) || groups[2]
+    group.items.push(item)
+  }
+
+  return groups.filter(group => group.items.length > 0)
+}
+
+export function notificationDestination(type) {
+  return /ticket|atendimento|d[uú]vida/i.test(String(type ?? '')) ? 'support' : 'reservation'
 }
 
 export function normalizeNotificationMessage(value) {

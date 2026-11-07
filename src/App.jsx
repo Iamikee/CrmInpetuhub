@@ -1,14 +1,41 @@
-import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions, Dialog, DialogPanel, DialogTitle, Menu, MenuButton, MenuItem, MenuItems, Tab, TabGroup, TabList, TabPanel, TabPanels, Transition, TransitionChild } from '@headlessui/react'
-import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, DoorOpen, Download, Eye, EyeOff, ExternalLink, FileText, Filter, GraduationCap, Home as HomeIcon, LayoutDashboard, ListChecks, LockKeyhole, Mail, MapPin, Menu as MenuIcon, MessageCircle, MoreHorizontal, Plus, Search, ShieldCheck, SlidersHorizontal, Users, X } from 'lucide-react'
+import { Fragment, lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions, Dialog, DialogPanel, DialogTitle, Menu, MenuButton, MenuItem, MenuItems, Tab, TabGroup, TabList, TabPanel, TabPanels, Transition, TransitionChild } from '@headlessui/react'
+import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, DoorOpen, Download, Eye, EyeOff, ExternalLink, FileText, Filter, GraduationCap, Home as HomeIcon, LayoutDashboard, ListChecks, LockKeyhole, Mail, MapPin, Menu as MenuIcon, MessageCircle, Moon, MoreHorizontal, Plus, Search, ShieldCheck, Sun, Users, X } from 'lucide-react'
 import { personas, personaQuotaLabel } from './personas.js'
-import { formatRelativeNotificationDate, normalizeNotificationMessage } from './notifications.js'
+import { formatRelativeNotificationDate, groupNotificationsByDay, normalizeNotificationMessage, notificationDestination } from './notifications.js'
+import { formatPhoneNumber, formatPhoneSubscriber, hasPhoneInput, isValidPhoneNumber, normalizePhoneToE164, parsePhoneParts, phoneCountryCodes, phoneNumberFromParts } from './phone.js'
 import { BRAND_LOGOS } from './brand.js'
-import { CountUp, Reveal, Stagger, StaggerItem, useScrollProgress } from './motion/index.js'
+import { CountUp, Reveal, useScrollProgress } from './motion/index.js'
+import ErrorBoundary from './ErrorBoundary.jsx'
 
 const CalendarPage = lazy(() => import('./CalendarPage.jsx'))
 const Crm = lazy(() => import('./CrmPage.jsx'))
 const loadPublicPage = name => lazy(() => import('./PublicPages.jsx').then(pages => ({ default: pages[name] })))
+
+export function readThemePreference() {
+  let savedTheme = null
+  try {
+    savedTheme = localStorage.getItem('inpetu-crm-theme')
+  } catch {
+    // Storage may be disabled; continue with the system preference.
+  }
+  if (savedTheme === 'dark' || savedTheme === 'light') return savedTheme
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+export function applyThemePreference(theme, persist = true) {
+  document.documentElement.dataset.theme = theme
+  document.documentElement.style.colorScheme = theme
+  document.body.dataset.crmTheme = theme
+  if (persist) {
+    try {
+      localStorage.setItem('inpetu-crm-theme', theme)
+    } catch {
+      // Theme application must not depend on storage availability.
+    }
+  }
+}
 const optionalFeatureModules = Object.values(import.meta.glob('./mural/*.jsx', { eager: true }))
   .map(module => module.default)
   .filter(Boolean)
@@ -118,22 +145,7 @@ export function consumeBookingDraft(spaceId) {
   sessionStorage.removeItem(BOOKING_DRAFT_KEY)
   return draft
 }
-export const phoneDigits = value => {
-  let digits = String(value || '').replace(/\D/g, '')
-  if (digits.length > 11 && digits.startsWith('55')) digits = digits.slice(2)
-  return digits.slice(0, 11)
-}
-export const formatBrazilianPhone = value => {
-  const digits = phoneDigits(value)
-  if (digits.length < 2) return digits
-  const areaCode = digits.slice(0, 2)
-  const subscriber = digits.slice(2)
-  if (!subscriber) return `(${areaCode})`
-  const prefixLength = digits.length > 10 ? 5 : 4
-  if (subscriber.length <= prefixLength) return `(${areaCode}) ${subscriber}`
-  return `(${areaCode}) ${subscriber.slice(0, prefixLength)}-${subscriber.slice(prefixLength)}`
-}
-const isValidBrazilianMobile = value => /^\(\d{2}\) 9\d{4}-\d{4}$/.test(String(value || ''))
+export { formatPhoneNumber as formatBrazilianPhone, hasPhoneInput, normalizePhoneToE164, isValidPhoneNumber }
 export const reservationStatusLabel = status => status === 'Confirmada' ? 'Aprovado' : status
 export const reservationStatusClass = status => status === 'Confirmada' ? 'status-confirmed' : status === 'Cancelada' ? 'status-cancelled' : 'status-pending'
 export const isGuidedTour = type => type?.trim().toLocaleLowerCase('pt-BR') === 'visita guiada'
@@ -215,6 +227,30 @@ const getRoomInitials = user => (user?.nome || user?.email || 'U')
   .map(part => part[0].toLocaleUpperCase('pt-BR'))
   .join('')
 export const localDateValue = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+const saoPauloDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Sao_Paulo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
+export const getSaoPauloDateTime = (instant = new Date()) => {
+  const parts = Object.fromEntries(saoPauloDateTimeFormatter.formatToParts(instant).map(part => [part.type, part.value]))
+  const date = `${parts.year}-${parts.month}-${parts.day}`
+  return { date, time: `${parts.hour}:${parts.minute}`, dateTime: `${date}T${parts.hour}:${parts.minute}:${parts.second}` }
+}
+export const getReservationStartError = (date, time, now = new Date()) => {
+  if (!date || !time) return ''
+  const saoPauloNow = getSaoPauloDateTime(now)
+  if (date < saoPauloNow.date) return 'A data de início deve ser hoje ou uma data futura.'
+  if (date === saoPauloNow.date && `${date}T${time}:00` < saoPauloNow.dateTime) {
+    return 'O horário de início não pode estar no passado.'
+  }
+  return ''
+}
 export const saoPauloDateTime = () => {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo',
@@ -244,6 +280,7 @@ export const addMinutesToTime = (time, minutes) => {
   const total = hours * 60 + mins + minutes
   return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
+export const formatTimeForDisplay = value => typeof value === 'string' ? value.slice(0, 5) : ''
 const reservationDurationHours = reservation => {
   const [startHour, startMinute] = (reservation.horarioInicio || '00:00').split(':').map(Number)
   const [endHour, endMinute] = (reservation.horarioFim || '00:00').split(':').map(Number)
@@ -344,23 +381,77 @@ export function Logo({ variant = 'horizontalLight', className = '' }) {
 export function Button({ children, variant = 'primary', icon: Icon, className = '', ...props }) {
   return <button className={`button button-${variant} icon-text ${className}`} {...props}>{Icon && <Icon size={17} strokeWidth={1.8} />}{children}</button>
 }
-export function PhoneInput({ value, onChange, ...props }) {
-  function handleChange(event) {
-    const digits = phoneDigits(event.currentTarget.value)
-    event.currentTarget.value = formatBrazilianPhone(digits)
-    onChange(digits)
+export function PhoneInput({ value, onChange, id, className = '', disabled = false, 'aria-invalid': ariaInvalid, 'aria-describedby': ariaDescribedBy }) {
+  const [parts, setParts] = useState(() => parsePhoneParts(value))
+  const numberInput = useRef(null)
+  const lastEmittedValue = useRef(value)
+  useEffect(() => {
+    if (value === lastEmittedValue.current) return
+    lastEmittedValue.current = value
+    setParts(parsePhoneParts(value))
+  }, [value])
+  const hasValue = hasPhoneInput(phoneNumberFromParts(parts))
+  const subscriberLength = parts.subscriber.length
+  const areaCodeLength = phoneCountryCodes.find(option => option.code === parts.countryCode)?.areaCodeLength || 2
+  const invalid = hasValue && (
+    !new RegExp(`^[1-9]\\d{${areaCodeLength - 1}}$`).test(parts.areaCode)
+    || (parts.countryCode === '55' ? ![8, 9].includes(subscriberLength) : subscriberLength < 6)
+    || !isValidPhoneNumber(phoneNumberFromParts(parts))
+  )
+  useEffect(() => {
+    numberInput.current?.setCustomValidity(invalid ? 'Informe DDI, DDD e número válidos.' : '')
+  }, [invalid])
+  const options = phoneCountryCodes.some(option => option.code === parts.countryCode)
+    ? phoneCountryCodes
+    : [{ code: parts.countryCode, country: 'Outro' }, ...phoneCountryCodes]
+  function update(patch) {
+    const next = { ...parts, ...patch }
+    const nextValue = phoneNumberFromParts(next)
+    setParts(next)
+    lastEmittedValue.current = nextValue
+    onChange(nextValue)
   }
 
-  return <input
-    {...props}
-    type="tel"
-    inputMode="numeric"
-    autoComplete="tel"
-    maxLength={15}
-    placeholder="(48) 99999-9999"
-    value={formatBrazilianPhone(value)}
-    onChange={handleChange}
-  />
+  return <div className={`phone-input${className ? ` ${className}` : ''}`} role="group" aria-label="Telefone">
+    <select
+      id={id}
+      aria-label="Código do país (DDI)"
+      autoComplete="tel-country-code"
+      value={parts.countryCode}
+      disabled={disabled}
+      onChange={event => update({ countryCode: event.currentTarget.value })}
+    >
+      {options.map(option => <option key={option.code} value={option.code}>{option.country} (+{option.code})</option>)}
+    </select>
+    <input
+      aria-label="DDD"
+      type="tel"
+      inputMode="numeric"
+      autoComplete="tel-area-code"
+      maxLength={areaCodeLength}
+      placeholder="DDD"
+      value={parts.areaCode}
+      disabled={disabled}
+      aria-invalid={Boolean(ariaInvalid) || invalid}
+      aria-describedby={ariaDescribedBy}
+      onChange={event => update({ areaCode: event.currentTarget.value.replace(/\D/g, '').slice(0, areaCodeLength) })}
+    />
+    <input
+      ref={numberInput}
+      aria-label="Número do telefone"
+      type="tel"
+      inputMode="numeric"
+      autoComplete="tel-local"
+      maxLength={12}
+      placeholder="Número"
+      value={formatPhoneSubscriber(parts.subscriber)}
+      disabled={disabled}
+      aria-invalid={Boolean(ariaInvalid) || invalid}
+      aria-describedby={ariaDescribedBy}
+      onChange={event => update({ subscriber: event.currentTarget.value.replace(/\D/g, '').slice(0, 10) })}
+    />
+    {invalid && <small className="phone-input-error" aria-live="polite">Informe DDI, DDD e número válidos.</small>}
+  </div>
 }
 export function PasswordInput(props) {
   const [visible, setVisible] = useState(false)
@@ -384,7 +475,7 @@ export function Modal({ open, close, title, children, wide = false }) {
   return <Transition appear show={open} as={Fragment}><Dialog as="div" className="dialog-root" onClose={close}>
     <TransitionChild as={Fragment} enter="ease-out duration-200" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-150" leaveFrom="opacity-100" leaveTo="opacity-0"><div className="dialog-backdrop" /></TransitionChild>
     <div className="dialog-wrap"><TransitionChild as={Fragment} enter="ease-out duration-200" enterFrom="opacity-0 translate-y-3" enterTo="opacity-100 translate-y-0" leave="ease-in duration-150" leaveFrom="opacity-100 translate-y-0" leaveTo="opacity-0 translate-y-3"><DialogPanel className={`dialog-panel ${wide ? 'dialog-wide' : ''}`}>
-      <div className="dialog-heading"><DialogTitle as={Title} className="dialog-title"><span className="dialog-title-emoji" aria-hidden="true">✨</span>{title}</DialogTitle><button className="icon-button" aria-label="Fechar" onClick={close}><X size={19} /></button></div>{children}
+      <div className="dialog-heading"><DialogTitle as={Title} className="dialog-title">{title}</DialogTitle><button className="icon-button" aria-label="Fechar" onClick={close}><X size={19} /></button></div>{children}
     </DialogPanel></TransitionChild></div>
   </Dialog></Transition>
 }
@@ -495,12 +586,17 @@ const notificationIcons = {
   RESERVA_CANCELADA: X,
   COTA_EXCEDIDA: CircleHelp,
 }
-export function NotificationCenter({ user }) {
+export function NotificationCenter({ user, onNavigate }) {
   const [items, setItems] = useState([])
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const containerRef = useRef(null)
+  const triggerRef = useRef(null)
+  const panelRef = useRef(null)
+  const closeRef = useRef(null)
+  const wasOpenRef = useRef(false)
+  const notificationId = useId()
   useEffect(() => {
     if (!user) {
       setItems([])
@@ -527,28 +623,62 @@ export function NotificationCenter({ user }) {
     return () => { active = false; window.clearInterval(timer) }
   }, [user])
   useEffect(() => {
-    if (!open) return
-    function closeWhenOutside(event) {
-      if (!containerRef.current?.contains(event.target)) setOpen(false)
+    if (!open) {
+      if (wasOpenRef.current) {
+        wasOpenRef.current = false
+        window.requestAnimationFrame(() => triggerRef.current?.focus())
+      }
+      return
     }
-    function closeOnEscape(event) {
-      if (event.key === 'Escape') setOpen(false)
+    wasOpenRef.current = true
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.requestAnimationFrame(() => closeRef.current?.focus())
+
+    function handleKeydown(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = [...panelRef.current.querySelectorAll(
+        'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      )].filter(element => element.getClientRects().length > 0)
+      if (!focusable.length) {
+        event.preventDefault()
+        panelRef.current.focus()
+        return
+      }
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && (document.activeElement === first || !panelRef.current.contains(document.activeElement))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (document.activeElement === last || !panelRef.current.contains(document.activeElement))) {
+        event.preventDefault()
+        first.focus()
+      }
     }
-    document.addEventListener('pointerdown', closeWhenOutside)
-    document.addEventListener('keydown', closeOnEscape)
+
+    document.addEventListener('keydown', handleKeydown)
     return () => {
-      document.removeEventListener('pointerdown', closeWhenOutside)
-      document.removeEventListener('keydown', closeOnEscape)
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleKeydown)
     }
   }, [open])
   async function markRead(item) {
-    if (item.lida) return
+    if (item.lida) return true
     try {
       const updated = await request(`/notificacoes/${item.idNotificacao}/lida`, { method: 'PATCH' })
       setItems(current => current.map(notification => notification.idNotificacao === updated.idNotificacao ? updated : notification))
       setError('')
+      return true
     } catch (markError) {
       setError(/forbidden/i.test(markError.message) ? 'Você não tem permissão para alterar as notificações.' : markError.message)
+      return false
     }
   }
   async function markAllRead() {
@@ -562,23 +692,51 @@ export function NotificationCenter({ user }) {
   }
   if (!user) return null
   const unread = items.filter(item => !item.lida).length
+  const groups = groupNotificationsByDay(items.slice(0, 12))
+
+  async function openNotification(item) {
+    if (!await markRead(item)) return
+    setOpen(false)
+    onNavigate?.(notificationDestination(item.tipo), item)
+  }
+
   return <div className="notification-center" ref={containerRef}>
-    <button type="button" className="notification-trigger" aria-label={`Notificações${unread ? `, ${unread} não lidas` : ''}`} aria-expanded={open} onClick={() => setOpen(value => !value)}>
-      <Bell size={19} />{unread > 0 && <span className="notification-count">{unread > 9 ? '9+' : unread}</span>}
+    <button ref={triggerRef} type="button" className="notification-trigger" aria-label={`Notificações${unread ? `, ${unread} não lidas` : ''}`} aria-expanded={open} aria-controls={`notification-panel-${notificationId}`} onClick={() => setOpen(value => !value)}>
+      <Bell size={19} />{unread > 0 && <span className="notification-count">{unread > 99 ? '99+' : unread}</span>}
     </button>
-    {open && <section className="notification-popover" aria-label="Notificações">
-      <div className="notification-heading"><strong>Notificações</strong><div><button type="button" className="notification-mark-all" onClick={markAllRead} disabled={!unread}>Marcar todas como lidas</button><button type="button" className="notification-close" aria-label="Fechar notificações" onClick={() => setOpen(false)}><X size={16} /></button></div></div>
-      {error && <p className="notification-error" role="alert">{error}</p>}
-      {loading && !items.length && !error ? <p className="notification-empty" role="status">Carregando notificações...</p> : items.length ? <div className="notification-list">{items.slice(0, 12).map(item => {
-        const Icon = notificationIcons[item.tipo] || Bell
-        const typeClass = String(item.tipo || 'geral').toLocaleLowerCase('pt-BR').replaceAll('_', '-')
-        return <button type="button" key={item.idNotificacao} className={`notification-item ${item.lida ? '' : 'notification-unread'}`} onClick={() => markRead(item)}>
-        <span className={`notification-type-icon notification-type-${typeClass}`} aria-hidden="true"><Icon size={18} /></span>
-        <span><strong>{item.titulo}</strong><small>{normalizeNotificationMessage(item.mensagem)}</small><time dateTime={item.dataHora} title={new Date(item.dataHora).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}>{formatRelativeNotificationDate(item.dataHora)}</time>{item.statusEmail !== 'ENVIADO' && <em>E-mail {item.statusEmail === 'DESATIVADO' ? 'desativado' : 'não enviado: verifique a configuração de envio'}</em>}</span>
-        {!item.lida && <i aria-label="Não lida" />}
-      </button>
-      })}</div> : !error && <p className="notification-empty">Você não tem notificações</p>}
-    </section>}
+    {open && createPortal(<div className="notification-layer" onClick={event => {
+      if (event.target === event.currentTarget) setOpen(false)
+    }}>
+      <div className="notification-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />
+      <section ref={panelRef} id={`notification-panel-${notificationId}`} className="notification-drawer" role="dialog" aria-modal="true" aria-labelledby={`notification-title-${notificationId}`} tabIndex={-1}>
+        <div className="notification-heading">
+          <h2 id={`notification-title-${notificationId}`}>Notificações</h2>
+          <div>
+            <button type="button" className="notification-mark-all" onClick={markAllRead} disabled={!unread}>Marcar todas como lidas</button>
+            <button ref={closeRef} type="button" className="notification-close" aria-label="Fechar notificações" onClick={() => setOpen(false)}><X size={18} /></button>
+          </div>
+        </div>
+        {error && <p className="notification-error" role="alert">{error}</p>}
+        {loading && !items.length && !error ? <p className="notification-empty" role="status">Carregando notificações...</p> : groups.length ? <div className="notification-list">
+          {groups.map(group => <section className="notification-day" key={group.label} aria-labelledby={`notification-group-${notificationId}-${group.label}`}>
+            <h3 id={`notification-group-${notificationId}-${group.label}`}>{group.label}</h3>
+            {group.items.map(item => {
+              const Icon = notificationIcons[item.tipo] || Bell
+              const typeClass = String(item.tipo || 'geral').toLocaleLowerCase('pt-BR').replaceAll('_', '-')
+              return <button type="button" key={item.idNotificacao} className={`notification-item ${item.lida ? '' : 'notification-unread'}`} onClick={() => openNotification(item)}>
+                <span className={`notification-type-icon notification-type-${typeClass}`} aria-hidden="true"><Icon size={18} /></span>
+                <span className="notification-item-content">
+                  <strong>{item.titulo}</strong>
+                  <small>{normalizeNotificationMessage(item.mensagem)}</small>
+                  <time dateTime={item.dataHora} title={new Date(item.dataHora).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}>{formatRelativeNotificationDate(item.dataHora)}</time>
+                </span>
+                {!item.lida && <i aria-label="Não lida" />}
+              </button>
+            })}
+          </section>)}
+        </div> : !error && <p className="notification-empty">Você não tem notificações</p>}
+      </section>
+    </div>, document.body)}
   </div>
 }
 const avatarPhotoCache = new Map()
@@ -733,7 +891,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
     || form.organizacao !== (profile.organizacao || '')
     || form.cargoVinculo !== (profile.cargoVinculo || '')
   )
-  const invalidPhone = Boolean(form.telefone) && !isValidBrazilianMobile(form.telefone)
+  const invalidPhone = hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)
   const passwordMismatch = Boolean(passwordForm.confirmarSenha)
     && passwordForm.novaSenha !== passwordForm.confirmarSenha
   const invalidNewPassword = passwordForm.novaSenha.length < 8
@@ -749,7 +907,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
     setProfile(null)
     request('/usuarios/me').then(data => {
       if (!active) return
-      const normalizedProfile = { ...data, telefone: data.telefone ? formatBrazilianPhone(data.telefone) : '' }
+      const normalizedProfile = { ...data, telefone: normalizePhoneToE164(data.telefone) }
       setProfile(normalizedProfile)
       setForm({
         nomeCompleto: normalizedProfile.nomeCompleto || '',
@@ -780,8 +938,8 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
     if (invalidPhone || !profileChanged) return
     setSaving(true); setError(''); setSuccess('')
     try {
-      const updated = await request('/usuarios/me', { method: 'PUT', body: JSON.stringify(form) })
-      const normalized = { ...updated, telefone: updated.telefone ? formatBrazilianPhone(updated.telefone) : '' }
+      const updated = await request('/usuarios/me', { method: 'PUT', body: JSON.stringify({ ...form, telefone: normalizePhoneToE164(form.telefone) }) })
+      const normalized = { ...updated, telefone: normalizePhoneToE164(updated.telefone) }
       setProfile(normalized)
       onUserUpdate?.({ ...user, nome: updated.nomeCompleto, email: updated.email })
       setSuccess('Perfil atualizado.')
@@ -878,7 +1036,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
       </section>
       <form className="profile-editor-form" onSubmit={saveProfile}>
         <label htmlFor="profile-name">Nome<input id="profile-name" required maxLength="100" value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
-        <label htmlFor="profile-phone">Telefone<PhoneInput id="profile-phone" value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} aria-invalid={invalidPhone} aria-describedby={invalidPhone ? 'profile-phone-error' : undefined} />{invalidPhone && <small id="profile-phone-error" className="profile-field-error">Informe um celular no formato (48) 99999-9999.</small>}</label>
+        <label htmlFor="profile-phone">Telefone<PhoneInput id="profile-phone" value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} aria-invalid={invalidPhone} aria-describedby={invalidPhone ? 'profile-phone-error' : undefined} />{invalidPhone && <small id="profile-phone-error" className="profile-field-error">Informe DDI, DDD e número válidos.</small>}</label>
         <label htmlFor="profile-organization">Organização<input id="profile-organization" required maxLength="100" value={form.organizacao} readOnly={isStaff} onChange={event => setForm({ ...form, organizacao: event.target.value })} /></label>
         <label htmlFor="profile-role">Cargo ou vínculo<input id="profile-role" required maxLength="100" value={form.cargoVinculo} onChange={event => setForm({ ...form, cargoVinculo: event.target.value })} /></label>
         <div className="profile-readonly">
@@ -904,24 +1062,46 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
     </div>}
   </Modal>
 }
-function Header({ view, setView, openLogin, onOpenCalendar, user, onLogout, onUserUpdate, optionalNavigation = [] }) {
+function Header({ view, setView, openLogin, user, onLogout, onUserUpdate, optionalNavigation = [] }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [profileDetailsOpen, setProfileDetailsOpen] = useState(false)
   const [compact, setCompact] = useState(false)
+  const [theme, setTheme] = useState(readThemePreference)
   useEffect(() => {
     const updateCompact = () => setCompact(window.scrollY > 24)
     updateCompact()
     window.addEventListener('scroll', updateCompact, { passive: true })
     return () => window.removeEventListener('scroll', updateCompact)
   }, [])
+  useEffect(() => {
+    applyThemePreference(theme, false)
+  }, [theme])
+  function toggleTheme() {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark'
+    applyThemePreference(nextTheme)
+    setTheme(nextTheme)
+  }
   const goTo = (id) => { setView('home'); setMenuOpen(false); window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0) }
   const perfilLabel = getProfileMenuRole(user)
-  return <header className={`site-header reference-header ${compact ? 'site-header-compact' : ''}`}><div className="header-inner"><button className="logo-button" aria-label="InPETU hub — página inicial" onClick={() => { setView(user && !isCrmUser(user) ? 'portal' : 'home'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}><Logo /></button>
+  return <header className={`site-header reference-header ${compact ? 'site-header-compact' : ''} ${menuOpen ? 'site-header-menu-open' : ''}`}><div className="header-inner"><button className="logo-button" aria-label="InPETU hub — página inicial" onClick={() => { setView(user && !isCrmUser(user) ? 'portal' : 'home'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}><Logo variant={theme === 'dark' ? 'horizontalDark' : 'horizontalLight'} /></button>
     <nav id="public-navigation" className={`main-nav ${menuOpen ? 'nav-open' : ''}`}><button className={view === 'home' || view === 'portal' ? 'nav-active' : ''} onClick={() => { setView(user && !isCrmUser(user) ? 'portal' : 'home'); window.scrollTo({ top: 0, behavior: 'smooth' }); setMenuOpen(false) }}>{user && !isCrmUser(user) ? 'Meu portal' : 'Início'}</button><button onClick={() => goTo('spaces')}>Nossos Espaços</button>{optionalNavigation.map(item => <button key={item.view} className={view === item.view ? 'nav-active' : ''} onClick={() => { setView(item.view); window.scrollTo({ top: 0, behavior: 'smooth' }); setMenuOpen(false) }}>{item.label}</button>)}<button className={view === 'help' ? 'nav-active' : ''} onClick={() => { setView('help'); setMenuOpen(false) }}>Fale Conosco</button>{!user && <button className="mobile-nav-login" onClick={() => { openLogin(); setMenuOpen(false) }}>Entrar</button>}</nav>
-    <div className="header-actions">{user ? <div className="profile-control"><NotificationCenter user={user} /><Menu as="div" className="profile-switcher"><MenuButton type="button" className="profile-trigger" aria-label={`Menu da conta de ${user.nome || user.email || 'usuário'}`}><Avatar user={user} tamanho={34} className="profile-avatar" /><span className="profile-meta"><strong>{user.nome || user.email || 'Perfil'}</strong>{perfilLabel && <small>{perfilLabel}</small>}</span><ChevronDown className="profile-chevron" size={16} aria-hidden="true" /></MenuButton><MenuItems className="profile-menu"><MenuItem><button type="button" onClick={() => setProfileDetailsOpen(true)}>Meu perfil</button></MenuItem><MenuItem><button type="button" onClick={() => setView('reservations')}>Minhas reservas</button></MenuItem>{isCrmUser(user) && <MenuItem><a href="/paineladm">Painel da equipe</a></MenuItem>}<div className="profile-menu-divider" role="separator" /><MenuItem><button type="button" className="profile-menu-signout" onClick={() => onLogout?.()}>Sair da conta</button></MenuItem></MenuItems></Menu><ProfileDialog open={profileDetailsOpen} close={() => setProfileDetailsOpen(false)} user={user} onUserUpdate={onUserUpdate} /></div> : <button className="team-link reference-login" onClick={() => { openLogin(); setMenuOpen(false) }}>Entrar</button>}<Button icon={CalendarDays} aria-label="Agendar Espaço" className="reference-header-cta" onClick={() => { onOpenCalendar(); setMenuOpen(false) }}><span className="header-cta-full">Agendar Espaço</span><span className="header-cta-short">Agendar</span></Button></div><button className="mobile-menu icon-button" aria-controls="public-navigation" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? 'Fechar menu' : 'Abrir menu'}><MenuIcon /></button>
+    <div className="header-actions">{user ? <div className="profile-control"><NotificationCenter user={user} onNavigate={destination => { setView(destination === 'support' ? 'help' : 'reservations'); setMenuOpen(false) }} /><Menu as="div" className="profile-switcher"><MenuButton type="button" className="profile-trigger" aria-label={`Menu da conta de ${user.nome || user.email || 'usuário'}`}><Avatar user={user} tamanho={36} className="profile-avatar" /><span className="profile-meta"><strong>{user.nome || user.email || 'Perfil'}</strong>{perfilLabel && <small>{perfilLabel}</small>}</span><ChevronDown className="profile-chevron" size={16} aria-hidden="true" /></MenuButton><MenuItems className="profile-menu"><MenuItem><button type="button" onClick={() => setProfileDetailsOpen(true)}>Meu perfil</button></MenuItem><MenuItem><button type="button" onClick={() => setView('reservations')}>Minhas reservas</button></MenuItem>{isCrmUser(user) && <MenuItem><a href="/paineladm">Painel da equipe</a></MenuItem>}<div className="profile-menu-divider" role="separator" /><MenuItem><button type="button" className="profile-menu-signout" onClick={() => onLogout?.()}>Sair da conta</button></MenuItem></MenuItems></Menu><ProfileDialog open={profileDetailsOpen} close={() => setProfileDetailsOpen(false)} user={user} onUserUpdate={onUserUpdate} /></div> : <button className="team-link reference-login" onClick={() => { openLogin(); setMenuOpen(false) }}>Entrar</button>}<button type="button" className="public-theme-toggle icon-button" aria-label={theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'} aria-pressed={theme === 'dark'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button></div><button className="mobile-menu icon-button" aria-controls="public-navigation" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? 'Fechar menu' : 'Abrir menu'}><MenuIcon /></button>
   </div></header>
 }
-function RoomGallery({ space, onClose, onConsultSpace }) {
+export function SpaceCardAction({ space, onConsultSpace, onRequestReservation, onClose }) {
+  const unavailable = space.ativo === false
+  const guidedTourSpace = isGuidedTour(space.tipoEspaco)
+  const label = unavailable ? 'Ver motivo' : guidedTourSpace ? 'Solicitar visita' : 'Ver horários'
+  const onClick = () => {
+    onClose?.()
+    if (guidedTourSpace && !unavailable) onRequestReservation(space)
+    else onConsultSpace(space)
+  }
+
+  return <button type="button" className="space-cta" onClick={onClick}>{label}</button>
+}
+
+export function RoomGallery({ space, onClose, onConsultSpace, onRequestReservation }) {
   const [imageIndex, setImageIndex] = useState(0)
   if (!space) return null
   const images = getRoomImages(space)
@@ -929,38 +1109,32 @@ function RoomGallery({ space, onClose, onConsultSpace }) {
   const coverImage = getRoomImage(space)
   return <Modal open={Boolean(space)} close={onClose} title={`Foto de ${space.nomeEspaco}`} wide>
     <div className="room-gallery">
-      <div className="room-gallery-stage" aria-live="polite">
+      <div className="room-gallery-stage" aria-label="Fotos do espaço">
         <img key={selectedImage} src={selectedImage} alt={`${space.nomeEspaco} , foto ${imageIndex + 1} de ${images.length}`} onError={event => {
           const image = event.currentTarget
           if (image.src !== new URL(coverImage, window.location.href).href) image.src = coverImage
         }} />
         {images.length > 1 && <>
-          <button type="button" className="room-gallery-arrow room-gallery-previous" aria-label="Foto anterior" onClick={() => setImageIndex(index => (index - 1 + images.length) % images.length)}><ChevronLeft size={22} /></button>
-          <button type="button" className="room-gallery-arrow room-gallery-next" aria-label="Próxima foto" onClick={() => setImageIndex(index => (index + 1) % images.length)}><ChevronRight size={22} /></button>
-          <span className="room-gallery-counter">{imageIndex + 1} / {images.length}</span>
+          <div className="room-gallery-controls" aria-label="Controles da galeria">
+            <button type="button" className="room-gallery-arrow room-gallery-previous" aria-label="Foto anterior" onClick={() => setImageIndex(index => (index - 1 + images.length) % images.length)}><ChevronLeft size={22} /></button>
+            <span className="room-gallery-counter" aria-live="polite">{imageIndex + 1} / {images.length}</span>
+            <button type="button" className="room-gallery-arrow room-gallery-next" aria-label="Próxima foto" onClick={() => setImageIndex(index => (index + 1) % images.length)}><ChevronRight size={22} /></button>
+          </div>
         </>}
       </div>
-      {images.length > 1 && <div className="room-gallery-thumbnails" aria-label="Selecionar foto">
-        {images.map((image, index) => <button key={image} type="button" className={index === imageIndex ? 'room-gallery-thumbnail room-gallery-thumbnail-active' : 'room-gallery-thumbnail'} aria-label={`Mostrar foto ${index + 1}`} aria-pressed={index === imageIndex} onClick={() => setImageIndex(index)}>
-          <img src={image} alt="" />
-        </button>)}
-      </div>}
       <div className="room-gallery-caption">
         <div><small>{space.tipoEspaco}</small><Title as="h3">{space.nomeEspaco}</Title><p>{space.capacidadePessoas ? `Capacidade para até ${space.capacidadePessoas} pessoas` : 'Capacidade não informada'}</p></div>
-        <Button icon={CalendarDays} onClick={() => { onClose(); onConsultSpace(space) }}>{space.ativo === false ? 'Ver motivo' : 'Ver horários'}</Button>
+        <SpaceCardAction space={space} onConsultSpace={onConsultSpace} onRequestReservation={onRequestReservation} onClose={onClose} />
       </div>
     </div>
   </Modal>
 }
-function Home({ spaces, spacesLoaded, onConsultSpace, onSearchAvailability, onOpenCalendar, user, optionalGallery: OptionalGallery, openOptionalFeature, openOptionalFeatureLogin }) {
+function Home({ spaces, spacesLoaded, onConsultSpace, onRequestReservation, onOpenCalendar, user, optionalGallery: OptionalGallery, openOptionalFeature, openOptionalFeatureLogin }) {
   const [filter, setFilter] = useState('Todos os espaços')
   const filtered = filter === 'Todos os espaços' ? spaces : spaces.filter(space => space.tipoEspaco === filter)
   const types = ['Todos os espaços', ...new Set(spaces.map(space => space.tipoEspaco))]
   const activeSpaces = spaces.filter(space => space.ativo !== false)
   const [gallerySpace, setGallerySpace] = useState(null)
-  const todayValue = localDateValue()
-  const [searchType, setSearchType] = useState('')
-  const [searchDate, setSearchDate] = useState(todayValue)
   const heroSpace = activeSpaces[0]
   return <>
     <Reveal as="section" className="hero-shell reference-hero">
@@ -968,11 +1142,7 @@ function Home({ spaces, spacesLoaded, onConsultSpace, onSearchAvailability, onOp
         <div className="reference-location icon-text"><MapPin size={17} /><span>Lote 73 · Sapiens Parque · Florianópolis</span></div>
         <Title as="h1" className="reference-heading">Um espaço para suas ideias <em>ganharem vida.</em></Title>
         <p className="reference-description">Encontre o ambiente certo para se reunir, aprender e fazer acontecer no InPETU Hub.</p>
-        <form id="availability-search" className="availability-search" onSubmit={event => { event.preventDefault(); onSearchAvailability(searchDate, searchType) }}>
-          <label><span>Tipo de espaço</span><select value={searchType} onChange={event => setSearchType(event.target.value)}><option value="">Todos os espaços</option>{[...new Set(spaces.map(space => space.tipoEspaco))].map(type => <option value={type} key={type}>{type}</option>)}</select></label>
-          <label><span>Data desejada</span><input type="date" min={todayValue} value={searchDate} onChange={event => setSearchDate(event.target.value)} /></label>
-          <Button type="submit" icon={Search}>Consultar horários</Button>
-        </form>
+        <Button icon={CalendarDays} onClick={onOpenCalendar}>Consultar horários</Button>
         <dl className="reference-stats">
           <div><dt><CountUp value={22} from={8} format={value => `08h-${Math.round(value)}h`} /></dt><dd>Horário de funcionamento</dd></div>
           <div><dt>{spacesLoaded ? <CountUp value={spaces.filter(space => space.ativo !== false).length} /> : '...'}</dt><dd>Ambientes ativos</dd></div>
@@ -983,17 +1153,15 @@ function Home({ spaces, spacesLoaded, onConsultSpace, onSearchAvailability, onOp
         {heroSpace && <RoomPhoto className="reference-hero-photo" space={heroSpace} alt={`Foto de ${heroSpace.nomeEspaco}`} />}
       </div>
     </Reveal>
-    <Reveal as="section" id="spaces" className="spaces-section"><div className="section-top"><div><Title as="h2">Nossos <em>Espaços</em></Title><p>Ambientes preparados para capacitações, eventos, mentorias e visitas técnicas.</p></div><button className="all-spaces-link icon-text" onClick={onOpenCalendar}>Abrir calendário completo <ArrowRight size={16} /></button></div>
-      <div className="filter-row"><div className="filter-label icon-text"><SlidersHorizontal size={15} /> EXPLORE POR TIPO</div><div className="filter-options">{types.map(type => <button key={type} className={`filter-chip ${filter === type ? 'filter-chip-active' : ''}`} onClick={() => setFilter(type)}>{type}</button>)}</div></div>
+    <section id="spaces" className="spaces-section"><div className="section-top"><div><Title as="h2">Nossos <em>Espaços</em></Title><p>Ambientes preparados para capacitações, eventos, mentorias e visitas técnicas.</p></div><button className="all-spaces-link icon-text" onClick={onOpenCalendar}>Abrir calendário completo <ArrowRight size={16} /></button></div>
+      <div className="filter-row"><div className="filter-options">{types.map(type => <button key={type} className={`filter-chip ${filter === type ? 'filter-chip-active' : ''}`} onClick={() => setFilter(type)}>{type}</button>)}</div></div>
       {!spacesLoaded && <p className="empty-inline" role="status">Carregando espaços...</p>}
       {spacesLoaded && spaces.length === 0 && <p className="empty-inline" role="status">Nenhum espaço cadastrado no momento.</p>}
-      <Stagger as="div" key={filter} className="space-grid">
+      <div key={filter} className="space-grid">
         {filtered.map(space => {
           const unavailable = space.ativo === false
-          const guidedTourSpace = isGuidedTour(space.tipoEspaco)
           const showSpaceCategory = normalizeRoomName(space.tipoEspaco) !== normalizeRoomName(space.nomeEspaco)
-          return <StaggerItem
-            as="article"
+          return <article
             className={`space-card ${unavailable ? 'space-card-unavailable' : ''}`}
             key={space.idEspaco}
           >
@@ -1016,16 +1184,14 @@ function Home({ spaces, spacesLoaded, onConsultSpace, onSearchAvailability, onOp
                   : space.descricao || space.equipamentosDisponiveis || 'Um ambiente versátil para as suas ideias.'}
               </p>
               {unavailable && <small className="unavailable-deadline">{unavailableDeadlineLabel(space.dataPrevisaoRetorno)}</small>}
-              <button className="space-cta" onClick={() => onConsultSpace(space)}>
-                {unavailable ? 'Ver motivo' : guidedTourSpace ? 'Solicitar visita' : 'Ver horários'}
-              </button>
+              <SpaceCardAction space={space} onConsultSpace={onConsultSpace} onRequestReservation={onRequestReservation} />
             </div>
-          </StaggerItem>
+          </article>
         })}
-      </Stagger>
-    </Reveal>
+      </div>
+    </section>
     {OptionalGallery && <OptionalGallery API={API} request={request} Modal={Modal} Button={Button} ImageUploadField={ImageUploadField} Reveal={Reveal} Title={Title} user={user} onOpenLogin={openOptionalFeatureLogin} preview onViewFull={openOptionalFeature} />}
-    {gallerySpace && <RoomGallery space={gallerySpace} onClose={() => setGallerySpace(null)} onConsultSpace={onConsultSpace} />}
+    {gallerySpace && <RoomGallery space={gallerySpace} onClose={() => setGallerySpace(null)} onConsultSpace={onConsultSpace} onRequestReservation={onRequestReservation} />}
   </>
 }
 function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTime, initialEndTime, user }) {
@@ -1036,15 +1202,15 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
   useEffect(() => {
     if (!space) return
     const horarioInicio = guidedTour ? initialTime || '' : initialTime || '09:00'
-    const defaults = { dataReserva: initialDate || localDateValue(), horarioInicio, horarioFim: guidedTour ? initialEndTime || '' : initialEndTime || addMinutesToTime(horarioInicio, 30), tituloEvento: '', descricaoFinalidade: '', quantidadeParticipantes: '', telefoneContato: phoneDigits(user?.telefone) }
+    const defaults = { dataReserva: initialDate || localDateValue(), horarioInicio, horarioFim: guidedTour ? initialEndTime || '' : initialEndTime || addMinutesToTime(horarioInicio, 30), tituloEvento: '', descricaoFinalidade: '', quantidadeParticipantes: '', telefoneContato: normalizePhoneToE164(user?.telefone) }
     const draft = consumeBookingDraft(space.idEspaco)
     setForm({ ...defaults, ...(draft?.form || {}) })
     setMessage('')
   }, [space, initialDate, initialTime, initialEndTime, guidedTour, user?.telefone])
   async function submit(event) {
     event.preventDefault()
-    if (form.telefoneContato && !isValidBrazilianMobile(formatBrazilianPhone(form.telefoneContato))) {
-      setMessage('Informe um celular válido para contato sobre a reserva.')
+    if (hasPhoneInput(form.telefoneContato) && !isValidPhoneNumber(form.telefoneContato)) {
+      setMessage('Informe DDI, DDD e número válidos para contato sobre a reserva.')
       return
     }
     if (!user) {
@@ -1084,7 +1250,7 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
         <label>Telefone para contato ou alteração<PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm(current => ({ ...current, telefoneContato }))} /><small>Usaremos este número caso seja necessário falar sobre a solicitação.</small></label>
       </section>
       <label><span>{guidedTour ? 'Data preferida da visita' : 'Data do encontro'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="date" min={localDateValue()} value={form.dataReserva} onChange={e => setForm({ ...form, dataReserva: e.target.value })} /></label><div className="field-pair"><label><span>{guidedTour ? 'Horário preferido de início' : 'Início'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min="08:00" max="21:30" step="1800" value={form.horarioInicio} onChange={e => setForm({ ...form, horarioInicio: e.target.value })} /></label><label><span>{guidedTour ? 'Horário preferido de término' : 'Fim'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min={form.horarioInicio || '08:30'} max="22:00" step="1800" value={form.horarioFim} onChange={e => setForm({ ...form, horarioFim: e.target.value })} /></label></div>
-      {guidedTour && <label>Quantidade de visitantes<input required type="number" min="1" max={space?.capacidadePessoas || 20} value={form.quantidadeParticipantes} onChange={e => setForm({ ...form, quantidadeParticipantes: e.target.value })} /><small>Capacidade máxima: {space?.capacidadePessoas || 20} pessoas.</small></label>}
+      {guidedTour && <label>Quantidade de visitantes<input required type="number" min="1" max={space?.capacidadePessoas || 20} value={form.quantidadeParticipantes} onChange={e => setForm({ ...form, quantidadeParticipantes: e.target.value === '' ? '' : e.target.value })} /><small>Capacidade máxima: {space?.capacidadePessoas || 20} pessoas.</small></label>}
       <label><span>{guidedTour ? 'Nome do grupo ou da instituição' : 'Nome do encontro'} <span className="required-indicator" aria-hidden="true">*</span></span><input required maxLength="150" placeholder={guidedTour ? 'Ex.: Turma de Engenharia da UFSC' : 'Ex.: Oficina de prototipagem'} value={form.tituloEvento} onChange={e => setForm({ ...form, tituloEvento: e.target.value })} /></label><label><span>{guidedTour ? 'Objetivo ou observações da visita' : 'O que você está planejando?'} <span className="required-indicator" aria-hidden="true">*</span></span><textarea required rows="3" placeholder={guidedTour ? 'Conte brevemente o perfil do grupo e o que gostaria de conhecer' : 'Conte um pouco sobre o encontro'} value={form.descricaoFinalidade} onChange={e => setForm({ ...form, descricaoFinalidade: e.target.value })} /></label>
       {message && <p className="form-message" role="alert">{message}</p>}<Button type="submit" icon={ArrowRight} disabled={busy}>{busy ? 'Enviando...' : guidedTour ? 'Enviar pedido de visita' : 'Continuar solicitação'}</Button><p className="form-footnote icon-text"><ShieldCheck size={14} /> Seus dados são tratados de acordo com a LGPD.</p>
     </form>
@@ -1180,19 +1346,32 @@ export function Kpi({ icon: Icon, label, value, change, accent }) { return <arti
 export function CrmTitle({ title, description, action }) { return <div className="crm-title-row"><div><Title as="h1">{title}</Title><p>{description}</p></div>{action}</div> }
 function PersonaCombobox({ value, onChange }) {
   const [query, setQuery] = useState('')
+  const buttonRef = useRef(null)
   const options = Object.entries(personas).filter(([id, persona]) =>
     `p${id} ${persona.label} ${personaQuotaLabel(persona)}`.toLocaleLowerCase('pt-BR')
       .includes(query.trim().toLocaleLowerCase('pt-BR')))
-  return <Combobox value={value ? Number(value) : null} onChange={selected => { onChange(String(selected)); setQuery('') }}>
+  return <Combobox value={value ? Number(value) : null} onChange={selected => {
+    if (selected == null) {
+      setQuery('')
+      return
+    }
+    onChange(String(selected))
+    setQuery('')
+  }}>
     <div className="persona-combobox">
       <ComboboxInput
         aria-label="Classificação por persona"
         className="persona-combobox-input"
         displayValue={id => id ? `P${id} · ${personas[Number(id)]?.label || ''}` : ''}
         onChange={event => setQuery(event.target.value)}
+        onClick={event => {
+          if (event.currentTarget.getAttribute('aria-expanded') !== 'true') buttonRef.current?.click()
+        }}
         placeholder="Selecione P1-P6"
       />
-      <ChevronDown size={16} aria-hidden="true" />
+      <ComboboxButton ref={buttonRef} className="persona-combobox-button" aria-label="Abrir lista de personas">
+        <ChevronDown size={16} aria-hidden="true" />
+      </ComboboxButton>
       <ComboboxOptions className="persona-combobox-options">
         {options.map(([id, persona]) => <ComboboxOption key={id} value={Number(id)} className={({ focus, selected }) => `persona-combobox-option ${focus ? 'persona-option-focus' : ''} ${selected ? 'persona-option-selected' : ''}`}>
           <span className={`persona-code-badge ${persona.badge}`}>P{id}</span>
@@ -1235,6 +1414,13 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
     .sort((left, right) => right.dataReserva.localeCompare(left.dataReserva))
   const clientTickets = tickets.filter(item => item.emailContato?.toLowerCase() === client.email?.toLowerCase())
   const clientAudit = auditItems.filter(item => item.target.includes(`#${client.idUsuario}`))
+  const clientProfileTabs = [
+    { name: 'Dados gerais', id: 'dados' },
+    { name: 'Reservas', id: 'reservas', count: clientReservations.length },
+    { name: 'Dúvidas', id: 'duvidas', count: clientTickets.length },
+    { name: 'Auditoria', id: 'auditoria' },
+  ]
+  const activeProfileTab = clientProfileTabs.find(item => item.name === tab)
   const hours = monthlyQuotaUsed(reservations, client.idUsuario)
   const personaChanged = Boolean(personaValue) && Number(personaValue) !== Number(client.idPersona || 0)
   const fields = [
@@ -1307,18 +1493,29 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   return <Modal open={Boolean(client)} close={close} title={client.nomeCompleto} wide>
     <div className="client-profile-heading"><Avatar user={client} nome={client.nomeCompleto} tamanho={48} className="client-profile-avatar" /><div><p className="client-profile-intro">Cadastro de solicitante · ficha e histórico</p><span className={`client-profile-status ${client.ativo === false ? 'client-profile-inactive' : ''}`}><i />{client.ativo === false ? 'Cadastro inativo' : 'Cadastro ativo'}</span></div></div>
     <div className="client-profile-tabs" role="tablist" aria-label="Seções da ficha do cliente">
-      {['Dados gerais', `Reservas (${clientReservations.length})`, `Dúvidas (${clientTickets.length})`, 'Auditoria'].map(label => {
-        const name = label.split(' (')[0]
-        return <button key={name} type="button" role="tab" aria-selected={tab === name} className={tab === name ? 'client-profile-tab-active' : ''} onClick={() => setTab(name)}>{label}</button>
-      })}
+      {clientProfileTabs.map(({ name, id, count }) => (
+        <button key={name} id={`client-profile-tab-${id}`} type="button" role="tab" aria-controls={`client-profile-panel-${id}`} aria-selected={tab === name} className={tab === name ? 'client-profile-tab-active' : ''} onClick={() => setTab(name)}>
+          {name}{count !== undefined && ` (${count})`}
+        </button>
+      ))}
     </div>
-    <div className="client-profile-content">
+    <div id={`client-profile-panel-${activeProfileTab.id}`} role="tabpanel" aria-labelledby={`client-profile-tab-${activeProfileTab.id}`} tabIndex={0} className="client-profile-content">
       {tab === 'Dados gerais' && <>
         <section className="client-persona-callout">
           <div><strong><ShieldCheck size={16} /> Persona de uso</strong><span>{persona ? `P${client.idPersona} · ${persona.label}` : 'Persona ainda não definida'}</span><small>{!persona ? 'Defina a persona para calcular a cota mensal.' : persona.quota == null ? 'Sem cota mensal definida na tabela.' : `${hours.toFixed(1).replace('.', ',')} de ${persona.quota} horas utilizadas/reservadas neste mês.`}</small></div>
           <div className="client-persona-edit"><label>Classificação<PersonaCombobox value={personaValue} onChange={next => { setPersonaValue(next); setError(''); setPersonaFeedback('') }} /></label><button type="button" className={`client-profile-action ${personaChanged ? 'persona-save-active' : ''}`} disabled={!personaChanged || personaBusy} onClick={savePersona}>{personaBusy ? 'Salvando...' : 'Salvar persona'}</button>{personaFeedback && <p className={personaFeedback.includes('sucesso') ? 'success-note' : 'form-message'} role="status">{personaFeedback}</p>}</div>
           <small className="client-profile-private-note">Visível somente para a equipe autorizada.</small>
         </section>
+        {canResetPassword && (resetOpen || resetResult) && <section className="client-password-reset" aria-label="Redefinir senha">
+          {resetResult ? <div className="temporary-password-result"><strong>Senha temporária gerada</strong><p>Copie e repasse ao usuário agora. Ela não será exibida novamente.</p><div><code>{resetResult}</code><button type="button" onClick={() => navigator.clipboard.writeText(resetResult).catch(() => setResetError('Não foi possível copiar automaticamente. Selecione e copie a senha.'))}>Copiar</button></div></div> : <form onSubmit={resetPassword}>
+            <div><strong>Redefinir senha</strong><small>As sessões atuais serão invalidadas e o usuário deverá criar uma senha nova no próximo acesso.</small></div>
+            <label className="reset-password-option"><input type="radio" checked={generatePassword} onChange={() => setGeneratePassword(true)} /> Gerar automaticamente</label>
+            <label className="reset-password-option"><input type="radio" checked={!generatePassword} onChange={() => setGeneratePassword(false)} /> Definir senha temporária</label>
+            {!generatePassword && <label>Senha temporária<input required minLength="8" maxLength="64" type="password" autoComplete="new-password" value={manualPassword} onChange={event => setManualPassword(event.target.value)} /></label>}
+            {resetError && <p className="form-message" role="alert">{resetError}</p>}
+            <div className="client-profile-actions"><button type="button" className="client-profile-action client-profile-action-muted" disabled={resetBusy} onClick={() => { setResetOpen(false); setResetError('') }}>Cancelar</button><button type="submit" className="client-profile-action" disabled={resetBusy}>{resetBusy ? 'Redefinindo...' : 'Confirmar redefinição'}</button></div>
+          </form>}
+        </section>}
         <form className="client-profile-edit-form" onSubmit={save}>
           {editing ? <div className="client-profile-grid client-profile-grid-edit">
             <label>Nome completo<input required maxLength={100} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
@@ -1331,24 +1528,16 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
           </div> : <div className="client-profile-grid">{fields.map(([label, value]) => <div className="client-profile-field" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
           {error && <p className="form-message" role="alert">{error}</p>}
           <div className="client-profile-actions">
-            {editing ? <><button type="button" className="client-profile-action client-profile-action-muted" disabled={busy} onClick={() => { setEditing(false); setError(''); setForm({ nomeCompleto: client.nomeCompleto || '', email: client.email || '', telefone: client.telefone || '', organizacao: client.organizacao || '', cargoVinculo: client.cargoVinculo || '' }) }}>Cancelar edição</button><button type="submit" className="client-profile-action" disabled={busy}>{busy ? 'Salvando...' : 'Salvar alterações'}</button></> : <button type="button" className="client-profile-action" onClick={() => { setEditing(true); setError('') }}>Editar dados</button>}
+            {editing
+              ? <><button type="button" className="client-profile-action client-profile-action-muted" disabled={busy} onClick={() => { setEditing(false); setError(''); setForm({ nomeCompleto: client.nomeCompleto || '', email: client.email || '', telefone: client.telefone || '', organizacao: client.organizacao || '', cargoVinculo: client.cargoVinculo || '' }) }}>Cancelar edição</button><button type="submit" className="client-profile-action" disabled={busy}>{busy ? 'Salvando...' : 'Salvar alterações'}</button></>
+              : <><button type="button" className="client-profile-action" onClick={() => { setEditing(true); setError('') }}>Editar dados</button>{canResetPassword && <button type="button" className="client-profile-action" onClick={() => { setResetResult(''); setResetOpen(true); setResetError('') }}>Redefinir senha</button>}</>}
           </div>
         </form>
         {canDeactivate && client.ativo !== false && <section className="client-profile-deactivation">
           {deactivationOpen ? <form onSubmit={deactivate}><div><strong>Desativar cadastro</strong><small>O acesso será desativado; reservas e histórico serão preservados.</small></div><label>Motivo<textarea required rows="3" maxLength={1000} value={deactivationReason} onChange={event => { setDeactivationReason(event.target.value); setDeactivationError('') }} /></label>{deactivationError && <p className="form-message" role="alert">{deactivationError}</p>}<div className="client-profile-actions"><button type="button" className="client-profile-action client-profile-action-muted" disabled={deactivationBusy} onClick={() => { setDeactivationOpen(false); setDeactivationError('') }}>Voltar</button><button type="submit" className="client-profile-action client-profile-action-danger" disabled={!deactivationReason.trim() || deactivationBusy}>{deactivationBusy ? 'Desativando...' : 'Confirmar desativação'}</button></div></form> : <button type="button" className="client-profile-action client-profile-action-danger" onClick={() => setDeactivationOpen(true)}>Desativar cadastro</button>}
         </section>}
-        {canResetPassword && <section className="client-profile-deactivation client-password-reset">
-          {resetResult ? <div className="temporary-password-result"><strong>Senha temporária gerada</strong><p>Copie e repasse ao usuário agora. Ela não será exibida novamente.</p><div><code>{resetResult}</code><button type="button" onClick={() => navigator.clipboard.writeText(resetResult).catch(() => setResetError('Não foi possível copiar automaticamente. Selecione e copie a senha.'))}>Copiar</button></div></div> : resetOpen ? <form onSubmit={resetPassword}>
-            <div><strong>Redefinir senha</strong><small>As sessões atuais serão invalidadas e o usuário deverá criar uma senha nova no próximo acesso.</small></div>
-            <label className="reset-password-option"><input type="radio" checked={generatePassword} onChange={() => setGeneratePassword(true)} /> Gerar automaticamente</label>
-            <label className="reset-password-option"><input type="radio" checked={!generatePassword} onChange={() => setGeneratePassword(false)} /> Definir senha temporária</label>
-            {!generatePassword && <label>Senha temporária<input required minLength="8" maxLength="64" type="password" autoComplete="new-password" value={manualPassword} onChange={event => setManualPassword(event.target.value)} /></label>}
-            {resetError && <p className="form-message" role="alert">{resetError}</p>}
-            <div className="client-profile-actions"><button type="button" className="client-profile-action client-profile-action-muted" disabled={resetBusy} onClick={() => { setResetOpen(false); setResetError('') }}>Cancelar</button><button type="submit" className="client-profile-action" disabled={resetBusy}>{resetBusy ? 'Redefinindo...' : 'Confirmar redefinição'}</button></div>
-          </form> : <button type="button" className="client-profile-action" onClick={() => { setResetOpen(true); setResetError('') }}>Redefinir senha</button>}
-        </section>}
       </>}
-      {tab === 'Reservas' && <div className="client-history-list">{clientReservations.length ? clientReservations.map(item => <article key={item.idReserva}><div><strong>{item.tituloEvento}</strong><small>{item.dataReserva} · {item.horarioInicio}-{item.horarioFim} · {item.espaco || 'Espaço InPETU'}</small></div><span className={`status-pill ${item.statusReserva === 'Confirmada' ? 'status-confirmed' : item.statusReserva === 'Cancelada' ? 'status-cancelled' : 'status-pending'}`}><i />{reservationStatusLabel(item.statusReserva)}</span>{item.excedeCota && <span className="quota-exceeded-badge">Excede cota</span>}</article>) : <p className="empty-inline">Este cliente ainda não possui reservas.</p>}</div>}
+      {tab === 'Reservas' && <div className="client-history-list">{clientReservations.length ? clientReservations.map(item => <article key={item.idReserva}><div><strong>{item.tituloEvento}</strong><small>{item.dataReserva} · {formatTimeForDisplay(item.horarioInicio)}-{formatTimeForDisplay(item.horarioFim)} · {item.espaco || 'Espaço InPETU'}</small></div><span className={`status-pill ${item.statusReserva === 'Confirmada' ? 'status-confirmed' : item.statusReserva === 'Cancelada' ? 'status-cancelled' : 'status-pending'}`}><i />{reservationStatusLabel(item.statusReserva)}</span>{item.excedeCota && <span className="quota-exceeded-badge">Excede cota</span>}</article>) : <p className="empty-inline">Este cliente ainda não possui reservas.</p>}</div>}
       {tab === 'Dúvidas' && <div className="client-history-list">{clientTickets.length ? clientTickets.map(ticket => <article key={ticket.idDuvida}><div><strong>{ticket.statusAtendimento} · {new Date(ticket.dataEnvio).toLocaleDateString('pt-BR')}</strong><small>{ticket.mensagemDuvida}</small>{ticket.respostaEquipe && <small>Resposta da equipe: {ticket.respostaEquipe}</small>}</div></article>) : <p className="empty-inline">Nenhuma dúvida vinculada a este e-mail.</p>}</div>}
       {tab === 'Auditoria' && <div className="client-history-list">{clientAudit.length ? clientAudit.map((item, index) => <article key={`${item.time}-${index}`}><div><strong>{item.action} · {item.time}</strong><small>{item.user} · {item.detail}</small></div></article>) : <p className="empty-inline">Nenhum registro de auditoria deste cliente.</p>}</div>}
     </div>
@@ -1606,7 +1795,11 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
           setView('password-change')
           return null
         }
-        if (isCrmUser(normalized) && window.location.pathname.replace(/\/+$/, '') !== '/paineladm' && new URLSearchParams(window.location.search).get('legacyAdmin') !== '1') {
+        const isPublicMuralRoute = window.location.pathname.replace(/\/+$/, '') === '/mural'
+        const muralRouteCanRemainPublic = isPublicMuralRoute
+          && (!runtimeConfigLoaded || runtimeConfig?.mural === true)
+        if (isCrmUser(normalized) && window.location.pathname.replace(/\/+$/, '') !== '/paineladm'
+          && new URLSearchParams(window.location.search).get('legacyAdmin') !== '1' && !muralRouteCanRemainPublic) {
           window.location.replace('/paineladm')
           return null
         }
@@ -1630,7 +1823,7 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
       window.removeEventListener('focus', refreshNow)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
-  }, [user?.idUsuario, user?.email])
+  }, [user?.idUsuario, user?.email, runtimeConfig, runtimeConfigLoaded])
   function updateCancel(item, reason) {
     const update = items => items.map(r => r.idReserva === item.idReserva ? { ...r, ...item, statusReserva: 'Cancelada', motivoCancelamento: reason } : r)
     setReservations(update); setMyReservations(update)
@@ -1656,31 +1849,33 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
   if (view === 'password-change') {
     return <div className="public-app"><ReadingProgress /><Suspense fallback={<PageLoading />}><PasswordChangePage user={user} onLogout={logout} onPasswordChanged={passwordChanged} /></Suspense><LegalNotice /></div>
   }
-  if (view === 'crm') return <><Suspense fallback={<p className="page-loading" role="status">Carregando painel da equipe...</p>}><Crm user={user} setUser={setUser} onReturnHome={() => { setView('home'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} spaces={spaces} setSpaces={setSpaces} reservations={reservations} setReservations={setReservations} optionalExtensions={optionalCrmExtensions} /></Suspense><LegalNotice /></>
+  if (view === 'crm') return <ErrorBoundary><Suspense fallback={<p className="page-loading" role="status">Carregando painel da equipe...</p>}><Crm user={user} setUser={setUser} onReturnHome={() => { setView('home'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} spaces={spaces} setSpaces={setSpaces} reservations={reservations} setReservations={setReservations} optionalExtensions={optionalCrmExtensions} /></Suspense><LegalNotice /></ErrorBoundary>
   return (
-    <div className="public-app">
-      <ReadingProgress />
-      <Header view={view} setView={setView} openLogin={() => setView('access')} onOpenCalendar={openCalendar} user={user} onLogout={logout} onUserUpdate={updateCurrentUser} optionalNavigation={optionalNavigation} />
-      {bookingConfirmation && <div className="booking-confirmation" role="status"><span className="booking-confirmation-icon" aria-hidden="true"><Check size={18} /></span><div><strong>Reserva enviada</strong><p>{bookingConfirmation}</p></div><button type="button" aria-label="Fechar confirmação" onClick={() => setBookingConfirmation('')}><X size={18} /></button></div>}
-      {dataError && <p className="form-message api-error-banner" role="alert">{dataError}{dataError === SESSION_EXPIRED_MESSAGE ? '' : ' Atualize a página para tentar novamente.'}</p>}
-      {view === 'home' && <main className="public-main"><Home spaces={spaces} spacesLoaded={spacesLoaded} onConsultSpace={showSpaceAvailability} setSignupOpen={() => setView('signup')} onOpenCalendar={openCalendar} user={user} optionalGallery={previewFeature?.PublicGallery} openOptionalFeature={() => previewFeatureRoute && setView(previewFeatureRoute.view)} openOptionalFeatureLogin={() => openLogin(previewFeatureRoute?.view)} onSearchAvailability={(date, kind) => { setCalendarQuery({ date, kind, spaceId: '' }); setView('calendar'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} /></main>}
-      {activeFeatureRoute && <main className="public-main">{!runtimeConfigLoaded ? <p className="page-loading" role="status">Carregando configuração...</p> : runtimeConfigError ? <p className="form-message" role="alert">{runtimeConfigError}</p> : ActiveFeaturePage ? <ActiveFeaturePage API={API} request={request} Modal={Modal} Button={Button} ImageUploadField={ImageUploadField} Reveal={Reveal} Title={Title} user={user} onOpenLogin={() => openLogin(activeFeatureRoute.view)} /> : <section className="empty-inline" aria-labelledby="not-found-title"><strong id="not-found-title">Página não encontrada</strong><p>O endereço solicitado não está disponível.</p></section>}</main>}
-      {requestedFeatureRoute && !activeFeatureRoute && <main className="public-main">{!runtimeConfigLoaded ? <p className="page-loading" role="status">Carregando configuração...</p> : runtimeConfigError ? <p className="form-message" role="alert">{runtimeConfigError}</p> : <section className="empty-inline" aria-labelledby="not-found-title"><strong id="not-found-title">Página não encontrada</strong><p>O endereço solicitado não está disponível.</p></section>}</main>}
-      {view === 'portal' && user ? <Suspense fallback={<PageLoading />}><PortalHome user={user} items={myReservations} reservationsLoaded={myReservationsLoaded} onOpenCalendar={openCalendar} onOpenReservations={() => setView('reservations')} /></Suspense> : view === 'portal' && <Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense>}
-      {view === 'calendar' && <Reveal key={view} className="route-reveal"><Suspense fallback={<p className="page-loading" role="status">Carregando calendário...</p>}><CalendarPage spaces={spaces} spacesLoaded={spacesLoaded} onReserve={openBooking} initialDate={calendarQuery.date || localDateValue()} initialKind={calendarQuery.kind} initialSpaceId={calendarQuery.spaceId} availabilityVersion={availabilityVersion} /></Suspense></Reveal>}
-      {view === 'reservations' && user ? <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><ReservationsPage items={myReservations} onCancel={updateCancel} /></Suspense></Reveal> : view === 'reservations' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense></Reveal>}
-      {view === 'help' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><HelpPage /></Suspense></Reveal>}
-      {(view === 'terms' || view === 'privacy') && <LegalPage privacy={view === 'privacy'} optionalPrivacySection={OptionalPrivacySection} optionalTermsSection={OptionalTermsSection} />}
-      {view === 'access' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense></Reveal>}
-      {view === 'signup' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><SignupPage onBack={() => setView('access')} onCodeSent={onCodeSent} /></Suspense></Reveal>}
-      {!['access', 'signup'].includes(view) && <Footer setView={setView} />}
-      <LegalNotice />
-      <Modal open={Boolean(unavailableSpace)} close={() => setUnavailableSpace(null)} title="Espaço indisponível">
-        <div className="unavailable-reason-modal"><strong>{unavailableSpace?.nomeEspaco}</strong><p>{unavailableSpace?.motivoIndisponibilidade || 'Este espaço está temporariamente indisponível.'}</p>{unavailableSpace?.dataPrevisaoRetorno && <small>{unavailableDeadlineLabel(unavailableSpace.dataPrevisaoRetorno)}</small>}</div>
-        <Button onClick={() => setUnavailableSpace(null)}>Fechar</Button>
-      </Modal>
-      <BookingModal space={bookingSpace} close={() => setBookingSpace(null)} onSaved={updateSaved} openLogin={() => openLogin('calendar')} initialDate={bookingSchedule.date} initialTime={bookingSchedule.time} initialEndTime={bookingEndTime} user={user} />
-    </div>
+    <ErrorBoundary>
+      <div className="public-app">
+        <ReadingProgress />
+        <Header view={view} setView={setView} openLogin={() => setView('access')} user={user} onLogout={logout} onUserUpdate={updateCurrentUser} optionalNavigation={optionalNavigation} />
+        {bookingConfirmation && <div className="booking-confirmation" role="status"><span className="booking-confirmation-icon" aria-hidden="true"><Check size={18} /></span><div><strong>Reserva enviada</strong><p>{bookingConfirmation}</p></div><button type="button" aria-label="Fechar confirmação" onClick={() => setBookingConfirmation('')}><X size={18} /></button></div>}
+        {dataError && <p className="form-message api-error-banner" role="alert">{dataError}{dataError === SESSION_EXPIRED_MESSAGE ? '' : ' Atualize a página para tentar novamente.'}</p>}
+        {view === 'home' && <main className="public-main"><Home spaces={spaces} spacesLoaded={spacesLoaded} onConsultSpace={showSpaceAvailability} onRequestReservation={openBooking} setSignupOpen={() => setView('signup')} onOpenCalendar={openCalendar} user={user} optionalGallery={previewFeature?.PublicGallery} openOptionalFeature={() => previewFeatureRoute && setView(previewFeatureRoute.view)} openOptionalFeatureLogin={() => openLogin(previewFeatureRoute?.view)} /></main>}
+        {activeFeatureRoute && <main className="public-main">{!runtimeConfigLoaded ? <p className="page-loading" role="status">Carregando configuração...</p> : runtimeConfigError ? <p className="form-message" role="alert">{runtimeConfigError}</p> : ActiveFeaturePage ? <ActiveFeaturePage API={API} request={request} Modal={Modal} Button={Button} ImageUploadField={ImageUploadField} Reveal={Reveal} Title={Title} user={user} onOpenLogin={() => openLogin(activeFeatureRoute.view)} /> : <section className="empty-inline" aria-labelledby="not-found-title"><strong id="not-found-title">Página não encontrada</strong><p>O endereço solicitado não está disponível.</p></section>}</main>}
+        {requestedFeatureRoute && !activeFeatureRoute && <main className="public-main">{!runtimeConfigLoaded ? <p className="page-loading" role="status">Carregando configuração...</p> : runtimeConfigError ? <p className="form-message" role="alert">{runtimeConfigError}</p> : <section className="empty-inline" aria-labelledby="not-found-title"><strong id="not-found-title">Página não encontrada</strong><p>O endereço solicitado não está disponível.</p></section>}</main>}
+        {view === 'portal' && user ? <Suspense fallback={<PageLoading />}><PortalHome user={user} items={myReservations} reservationsLoaded={myReservationsLoaded} onOpenCalendar={openCalendar} onOpenReservations={() => setView('reservations')} /></Suspense> : view === 'portal' && <Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense>}
+        {view === 'calendar' && <Reveal key={view} className="route-reveal"><Suspense fallback={<p className="page-loading" role="status">Carregando calendário...</p>}><CalendarPage spaces={spaces} spacesLoaded={spacesLoaded} onReserve={openBooking} initialDate={calendarQuery.date || localDateValue()} initialKind={calendarQuery.kind} initialSpaceId={calendarQuery.spaceId} availabilityVersion={availabilityVersion} /></Suspense></Reveal>}
+        {view === 'reservations' && user ? <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><ReservationsPage items={myReservations} onCancel={updateCancel} /></Suspense></Reveal> : view === 'reservations' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense></Reveal>}
+        {view === 'help' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><HelpPage /></Suspense></Reveal>}
+        {(view === 'terms' || view === 'privacy') && <LegalPage privacy={view === 'privacy'} optionalPrivacySection={OptionalPrivacySection} optionalTermsSection={OptionalTermsSection} />}
+        {view === 'access' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense></Reveal>}
+        {view === 'signup' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><SignupPage onBack={() => setView('access')} onCodeSent={onCodeSent} /></Suspense></Reveal>}
+        {!['access', 'signup'].includes(view) && <Footer setView={setView} />}
+        <LegalNotice />
+        <Modal open={Boolean(unavailableSpace)} close={() => setUnavailableSpace(null)} title="Espaço indisponível">
+          <div className="unavailable-reason-modal"><strong>{unavailableSpace?.nomeEspaco}</strong><p>{unavailableSpace?.motivoIndisponibilidade || 'Este espaço está temporariamente indisponível.'}</p>{unavailableSpace?.dataPrevisaoRetorno && <small>{unavailableDeadlineLabel(unavailableSpace.dataPrevisaoRetorno)}</small>}</div>
+          <Button onClick={() => setUnavailableSpace(null)}>Fechar</Button>
+        </Modal>
+        <BookingModal space={bookingSpace} close={() => setBookingSpace(null)} onSaved={updateSaved} openLogin={() => openLogin('calendar')} initialDate={bookingSchedule.date} initialTime={bookingSchedule.time} initialEndTime={bookingEndTime} user={user} />
+      </div>
+    </ErrorBoundary>
   )
 }
 

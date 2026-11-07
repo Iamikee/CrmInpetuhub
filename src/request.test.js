@@ -118,6 +118,25 @@ describe('request session handling', () => {
     })
   })
 
+  it('uses the Portuguese API message when editing a reservation is rejected', async () => {
+    const message = 'Não é possível editar a reserva para uma data ou horário que já passou.'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      status: 400,
+      ok: false,
+      text: async () => JSON.stringify({
+        status: 400,
+        error: 'Bad Request',
+        message,
+        path: '/api/v1/reservas/3',
+      }),
+    }))
+
+    await expect(request('/reservas/3', { method: 'PUT', body: '{}' })).rejects.toMatchObject({
+      status: 400,
+      message,
+    })
+  })
+
   it('shows a clear rate-limit message and uses Retry-After when provided', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       status: 429,

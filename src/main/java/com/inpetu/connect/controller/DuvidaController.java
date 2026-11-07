@@ -6,6 +6,7 @@ import com.inpetu.connect.model.DuvidaAtendimento;
 import com.inpetu.connect.repository.DuvidaAtendimentoRepository;
 import com.inpetu.connect.service.BrevoEmailClient;
 import com.inpetu.connect.service.EmailTemplateRenderer;
+import com.inpetu.connect.util.TelefoneUtils;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
@@ -46,7 +47,7 @@ public class DuvidaController {
         return salvar(request, anexo);
     }
     private DuvidaAtendimento salvar(DuvidaRequest request, MultipartFile anexo) {
-        DuvidaAtendimento d = new DuvidaAtendimento(); d.setEmailContato(request.emailContato()); d.setTelefoneContato(request.telefoneContato()); d.setMensagemDuvida(request.mensagemDuvida());
+        DuvidaAtendimento d = new DuvidaAtendimento(); d.setEmailContato(request.emailContato()); d.setTelefoneContato(TelefoneUtils.normalizarE164(request.telefoneContato())); d.setMensagemDuvida(request.mensagemDuvida());
         Path savedAttachment = null;
         if (anexo != null && !anexo.isEmpty()) {
             if (anexo.getSize() > 10L * 1024 * 1024) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O anexo deve ter até 10 MB.");

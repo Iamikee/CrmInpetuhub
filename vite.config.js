@@ -21,6 +21,20 @@ export default defineConfig(({ command }) => ({
     },
   },
   plugins: [react(), tailwindcss()],
-  server: { host: 'localhost', port: 5173 },
+  server: {
+    host: 'localhost',
+    port: 5173,
+    watch: {
+      ignored: [
+        '**/target/**',
+        '**/.tsupgrader/**',
+        '**/.git/**',
+        '**/src/main/java/**',
+        '**/src/test/java/**',
+        '**/src/main/resources/templates/**',
+        '**/src/main/resources/static/assets/**',
+      ],
+    },
+  },
   preview: { host: 'localhost' },
 }))
