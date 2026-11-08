@@ -1417,9 +1417,11 @@ export function PasswordRecoveryForm({ onCancel, onSuccess }) {
     </>}
     {message && <p className="account-notice" role="status">{message}</p>}
     {error && <p className="account-notice account-notice-error" role="alert">{error}</p>}
-    <Button type="submit" disabled={busy}>{busy ? 'Aguarde...' : step === 'email' ? 'Enviar código' : step === 'code' ? 'Validar código' : 'Redefinir senha'}</Button>
-    {step !== 'email' && <button type="button" className="text-button" onClick={() => { setStep(step === 'password' ? 'code' : 'email'); setError(''); setMessage('') }}>Voltar</button>}
-    <button type="button" className="text-button" onClick={onCancel}>Voltar para o login</button>
+    <div className="password-recovery-actions">
+      <Button type="submit" disabled={busy}>{busy ? 'Aguarde...' : step === 'email' ? 'Enviar código' : step === 'code' ? 'Validar código' : 'Redefinir senha'}</Button>
+      {step !== 'email' && <button type="button" className="text-button" onClick={() => { setStep(step === 'password' ? 'code' : 'email'); setError(''); setMessage('') }}>Voltar</button>}
+      <button type="button" className="text-button" onClick={onCancel}>Voltar para o login</button>
+    </div>
   </form>
 }
 export function Kpi({ icon: Icon, label, value, change, accent }) { return <article className="kpi-card"><div className={`kpi-icon kpi-${accent}`}><Icon size={18} /></div><span className="kpi-label">{label}</span><strong className="kpi-value">{value}</strong><small>{change}</small><ArrowUpRight className="kpi-trend" size={16} /></article> }
