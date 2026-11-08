@@ -395,6 +395,7 @@ export function Button({ children, variant = 'primary', icon: Icon, className = 
 export function PhoneInput({ value, onChange, id, className = '', disabled = false, 'aria-invalid': ariaInvalid, 'aria-describedby': ariaDescribedBy }) {
   const [parts, setParts] = useState(() => parsePhoneParts(value))
   const [invalidTextInput, setInvalidTextInput] = useState(false)
+  const areaCodeInput = useRef(null)
   const numberInput = useRef(null)
   const lastEmittedValue = useRef(value)
   useEffect(() => {
@@ -458,6 +459,7 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       {options.map(option => <option key={option.code} value={option.code}>{option.country} (+{option.code})</option>)}
     </select>
     <input
+      ref={areaCodeInput}
       aria-label="DDD"
       type="tel"
       inputMode="numeric"
@@ -468,7 +470,21 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       disabled={disabled}
       aria-invalid={Boolean(ariaInvalid) || invalid}
       aria-describedby={ariaDescribedBy}
-      onChange={event => update({ ...parts, areaCode: event.currentTarget.value.replace(/\D/g, '').slice(0, areaCodeLength) })}
+      onChange={event => {
+        const areaCode = event.currentTarget.value.replace(/\D/g, '').slice(0, areaCodeLength)
+        const shouldFocusNumber = !parts.subscriber
+          && parts.areaCode.length < areaCodeLength
+          && areaCode.length === areaCodeLength
+        update({ ...parts, areaCode })
+        if (shouldFocusNumber) numberInput.current?.focus()
+      }}
+      onPaste={event => {
+        const pasted = event.clipboardData.getData('text')
+        if (pasted.replace(/\D/g, '').length <= areaCodeLength) return
+        event.preventDefault()
+        update(parsePhoneParts(pasted))
+        numberInput.current?.focus()
+      }}
     />
     <input
       ref={numberInput}
@@ -483,6 +499,13 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       aria-invalid={Boolean(ariaInvalid) || invalid}
       aria-describedby={ariaDescribedBy}
       onChange={event => updateSubscriber(event.currentTarget.value)}
+      onKeyDown={event => {
+        if (event.key !== 'Backspace' || parts.subscriber) return
+        event.preventDefault()
+        const input = areaCodeInput.current
+        input?.focus()
+        input?.setSelectionRange(input.value.length, input.value.length)
+      }}
       onPaste={event => {
         const pasted = event.clipboardData.getData('text')
         if (!pasted) return
