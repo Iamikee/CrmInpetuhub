@@ -67,12 +67,23 @@ export const clearStoredUser = () => {
   sessionStorage.removeItem('inpetu-login-return-view')
 }
 const isCrmUser = user => [1, 2, 3].includes(Number(user?.perfil ?? user?.idPerfil))
+export const getSuccessfulLoginDestination = user => isCrmUser(user) ? '/paineladm' : null
 export const getProfileRoleLabel = user => ({
   1: 'Coordenador',
   2: 'Gestor de espaços',
   3: 'Atendente',
   4: 'Solicitante',
 }[Number(user?.perfil ?? user?.idPerfil)] || 'Solicitante')
+export function shouldRedirectCrmUserToPanel(user, pathname, search, muralRouteCanRemainPublic = false) {
+  const currentPath = pathname.replace(/\/+$/, '') || '/'
+  const params = new URLSearchParams(search)
+  const isExplicitHome = currentPath === '/' && params.get('view') === 'home'
+  return isCrmUser(user)
+    && currentPath !== '/paineladm'
+    && !isExplicitHome
+    && params.get('legacyAdmin') !== '1'
+    && !(currentPath === '/mural' && muralRouteCanRemainPublic)
+}
 export const getProfileMenuRole = user => {
   const role = getProfileRoleLabel(user)
   const name = String(user?.nome || user?.nomeCompleto || '').trim()
@@ -1755,7 +1766,7 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
     }
     if (crmUser) {
       consumeLoginDestination()
-      window.location.assign('/paineladm')
+      window.location.assign(getSuccessfulLoginDestination(nextUser))
     } else {
       setView(consumeLoginDestination() || (bookingDraft ? 'calendar' : 'portal'))
     }
@@ -1876,8 +1887,7 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
         const isPublicMuralRoute = window.location.pathname.replace(/\/+$/, '') === '/mural'
         const muralRouteCanRemainPublic = isPublicMuralRoute
           && (!runtimeConfigLoaded || runtimeConfig?.mural === true)
-        if (isCrmUser(normalized) && window.location.pathname.replace(/\/+$/, '') !== '/paineladm'
-          && new URLSearchParams(window.location.search).get('legacyAdmin') !== '1' && !muralRouteCanRemainPublic) {
+        if (shouldRedirectCrmUserToPanel(normalized, window.location.pathname, window.location.search, muralRouteCanRemainPublic)) {
           window.location.replace('/paineladm')
           return null
         }
