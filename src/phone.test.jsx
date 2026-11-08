@@ -38,11 +38,57 @@ describe('phone input', () => {
     const onChange = vi.fn()
     render(<PhoneInput value="" onChange={onChange} />)
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'DDD' }), { target: { value: '48' } })
+    const areaCode = screen.getByRole('textbox', { name: 'DDD' })
+    const number = screen.getByRole('textbox', { name: 'Número do telefone' })
+    areaCode.focus()
+    fireEvent.change(areaCode, { target: { value: '4' } })
+    expect(document.activeElement).toBe(areaCode)
+    fireEvent.change(areaCode, { target: { value: '48' } })
+
+    expect(document.activeElement).toBe(number)
     fireEvent.change(screen.getByRole('textbox', { name: 'Número do telefone' }), { target: { value: '984260543' } })
 
     expect(onChange).toHaveBeenLastCalledWith('+5548984260543')
-    expect(screen.getByRole('textbox', { name: 'DDD' }).value).toBe('48')
+    expect(areaCode.value).toBe('48')
+    expect(number.value).toBe('98426-0543')
+  })
+
+  it('distributes a complete phone pasted in the area code field', () => {
+    const onChange = vi.fn()
+    render(<PhoneInput value="" onChange={onChange} />)
+    const areaCode = screen.getByRole('textbox', { name: 'DDD' })
+    const number = screen.getByRole('textbox', { name: 'Número do telefone' })
+
+    fireEvent.paste(areaCode, {
+      clipboardData: { getData: () => '(48) 98426-0543' },
+    })
+
+    expect(areaCode.value).toBe('48')
+    expect(number.value).toBe('98426-0543')
+    expect(document.activeElement).toBe(number)
+    expect(onChange).toHaveBeenLastCalledWith('+5548984260543')
+  })
+
+  it('moves focus back to the area code when Backspace is pressed on an empty number', () => {
+    render(<PhoneInput value="" onChange={() => {}} />)
+    const areaCode = screen.getByRole('textbox', { name: 'DDD' })
+    const number = screen.getByRole('textbox', { name: 'Número do telefone' })
+    fireEvent.change(areaCode, { target: { value: '48' } })
+    number.focus()
+
+    fireEvent.keyDown(number, { key: 'Backspace' })
+
+    expect(document.activeElement).toBe(areaCode)
+  })
+
+  it('keeps focus in the area code when it is edited after the number is filled', () => {
+    render(<PhoneInput value="+5548984260543" onChange={() => {}} />)
+    const areaCode = screen.getByRole('textbox', { name: 'DDD' })
+
+    areaCode.focus()
+    fireEvent.change(areaCode, { target: { value: '47' } })
+
+    expect(document.activeElement).toBe(areaCode)
     expect(screen.getByRole('textbox', { name: 'Número do telefone' }).value).toBe('98426-0543')
   })
 
