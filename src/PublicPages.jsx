@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown, Filter, Mail, MapPin, MessageCircle, Plus, ShieldCheck } from 'lucide-react'
-import { Avatar, Button, Logo, Modal, PasswordInput, PasswordRecoveryForm, PhoneInput, Title, calendarDaysUntil, formatBrazilianPhone, hasPhoneInput, isValidPhoneNumber, localDateValue, maskEmail, normalizePhoneToE164, request, reservationStatusClass, reservationStatusLabel, storeUser, uploadQuestion } from './App.jsx'
+import { API, Avatar, Button, Logo, Modal, PasswordInput, PasswordRecoveryForm, PhoneInput, Title, calendarDaysUntil, formatBrazilianPhone, hasPhoneInput, isValidPhoneNumber, localDateValue, maskEmail, normalizePhoneToE164, request, reservationStatusClass, reservationStatusLabel, storeUser } from './App.jsx'
 import { CountUp, Reveal, Stagger, StaggerItem } from './motion/index.js'
 
 export function AccessPage({ onLogin, onSignup }) {
@@ -43,14 +43,16 @@ export function AccessPage({ onLogin, onSignup }) {
 export function SignupPage({ onBack, onCodeSent }) {
   const [form, setForm] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '', confirmarSenha: '' })
   const [status, setStatus] = useState('')
+  const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
   const [sendFailedEmail, setSendFailedEmail] = useState('')
   const [resending, setResending] = useState(false)
   async function submit(event) {
     event.preventDefault()
     setStatus('')
+    setPhoneSubmitAttempted(true)
     if (form.nomeCompleto.trim().split(/\s+/).length < 2) return setStatus('Informe nome e sobrenome.')
     if (form.senha !== form.confirmarSenha) return setStatus('As senhas não coincidem.')
-    if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) return setStatus('Informe DDI, DDD e número válidos.')
+    if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) return
     try {
       const { confirmarSenha, ...cadastro } = form
       await request('/usuarios/cadastro-publico', { method: 'POST', body: JSON.stringify({ ...cadastro, telefone: normalizePhoneToE164(form.telefone) }) })
@@ -83,7 +85,7 @@ export function SignupPage({ onBack, onCodeSent }) {
       <form className="form-stack account-form" onSubmit={submit}>
         <label>Nome completo e sobrenome <span aria-hidden="true">*</span><input required autoComplete="name" value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: e.target.value })} /></label>
         <label>E-mail <span aria-hidden="true">*</span><input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
-        <label>Telefone<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} /></label>
+        <label>Telefone<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} validationAttempted={phoneSubmitAttempted} /></label>
         <label>Organização <span aria-hidden="true">*</span><input required value={form.organizacao} onChange={e => setForm({ ...form, organizacao: e.target.value })} /></label>
         <label>Cargo ou vínculo <span aria-hidden="true">*</span><input required value={form.cargoVinculo} onChange={e => setForm({ ...form, cargoVinculo: e.target.value })} /></label>
         <label>Senha <span aria-hidden="true">*</span><PasswordInput required minLength={8} maxLength={64} autoComplete="new-password" value={form.senha} onChange={e => setForm({ ...form, senha: e.target.value })} /></label>
@@ -353,10 +355,237 @@ export function PortalHome({ user, items, reservationsLoaded, onOpenCalendar, on
 }
 
 export function HelpPage() {
-  const [form, setForm] = useState({ emailContato: '', telefoneContato: '', mensagemDuvida: '' })
-  const [file, setFile] = useState(null)
+  const [form, setForm] = useState({ name: '', email: '', subject: '', motivo: '', phone: '', extension: '' })
+  const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
+  const [mode, setMode] = useState('create')
   const [status, setStatus] = useState('')
-  const [progress, setProgress] = useState(0)
-  async function submit(event) { event.preventDefault(); setStatus(''); if (hasPhoneInput(form.telefoneContato) && !isValidPhoneNumber(form.telefoneContato)) return setStatus('Informe DDI, DDD e número válidos.'); if (file && (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024)) return setStatus('Anexe PDF, PNG ou JPG de até 10 MB.'); const payload = { ...form, telefoneContato: normalizePhoneToE164(form.telefoneContato) }; try { if (file) await uploadQuestion(payload, file, setProgress); else await request('/duvidas', { method: 'POST', body: JSON.stringify(payload) }); setProgress(100); setStatus('Mensagem enviada. A equipe InPETU responderá pelo e-mail informado.'); setForm({ emailContato: '', telefoneContato: '', mensagemDuvida: '' }); setFile(null) } catch (error) { setStatus(error.message); setProgress(0) } }
-  return <main className="inner-page help-page"><div className="help-intro"><Title as="h1">Vamos conversar<br /><em>sobre sua ideia?</em></Title><p>Tem dúvidas sobre os espaços, eventos ou quer descobrir como fazer parte do ecossistema? Escreva para a gente.</p><div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div><div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div></div><form className="help-form" onSubmit={submit}><div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>Retornamos em até dois dias úteis.</small></div></div><label>Seu e-mail<input required type="email" value={form.emailContato} onChange={e => setForm({ ...form, emailContato: e.target.value })} /></label><label>Telefone <span>(opcional)</span><PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm({ ...form, telefoneContato })} /></label><label>Sua mensagem<textarea required rows="5" maxLength="5000" value={form.mensagemDuvida} onChange={e => setForm({ ...form, mensagemDuvida: e.target.value })} placeholder="Como podemos ajudar?" /></label><label className="upload-box"><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><span className="upload-icon"><Plus size={19} /></span><span><strong>{file ? file.name : 'Adicionar anexo'}</strong><small>PDF, PNG ou JPG · até 10 MB</small></span><span className="upload-action">Escolher arquivo</span></label>{progress > 0 && <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>}{status && <p className={status.startsWith('Mensagem') ? 'success-note' : 'form-message'}>{status}</p>}<Button type="submit">Enviar mensagem <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Seus dados são protegidos pela política de privacidade UFSC.</p></form></main>
+  const [statusCode, setStatusCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [issuedTicket, setIssuedTicket] = useState(null)
+  const [credentials, setCredentials] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('inpetu-helpdesk-ticket') || 'null') } catch { return null }
+  })
+  const [ticketCode, setTicketCode] = useState(credentials?.code || '')
+  const [ticketToken, setTicketToken] = useState(credentials?.token || '')
+  const [trackedTicket, setTrackedTicket] = useState(null)
+  const [messages, setMessages] = useState([])
+  const [reply, setReply] = useState('')
+  const [newStaffReplies, setNewStaffReplies] = useState(0)
+  const idempotencyKey = useRef(sessionStorage.getItem('inpetu-helpdesk-idempotency-key'))
+  const lastMessageSeq = useRef(0)
+
+  function mergeMessages(current, incoming) {
+    const bySequence = new Map(current.map(message => [message.seq, message]))
+    incoming.forEach(message => bySequence.set(message.seq, message))
+    return [...bySequence.values()].sort((first, second) => first.seq - second.seq)
+  }
+
+  function updateForm(field, value) {
+    if (busy) return
+    if (idempotencyKey.current) {
+      idempotencyKey.current = null
+      sessionStorage.removeItem('inpetu-helpdesk-idempotency-key')
+    }
+    setStatusCode('')
+    setForm(current => ({ ...current, [field]: value }))
+  }
+
+  async function helpdeskRequest(path, { method = 'GET', body, token, idempotency } = {}) {
+    let response
+    try {
+      response = await fetch(`${API}/helpdesk${path}`, {
+        method,
+        credentials: 'omit',
+        headers: {
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+          ...(token ? { 'X-Ticket-Token': token } : {}),
+          ...(idempotency ? { 'Idempotency-Key': idempotency } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      })
+    } catch {
+      throw new Error('Não foi possível conectar ao Help Desk. Tente novamente.')
+    }
+    const text = await response.text()
+    let result = null
+    if (text) {
+      try { result = JSON.parse(text) } catch { result = null }
+    }
+    if (!response.ok) {
+      const error = new Error(result?.message || 'Não foi possível concluir a solicitação.')
+      error.status = response.status
+      error.code = result?.code
+      error.retryAfter = response.headers.get('Retry-After')
+      throw error
+    }
+    return result
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    setStatus('')
+    setStatusCode('')
+    setPhoneSubmitAttempted(true)
+    if (hasPhoneInput(form.phone) && !isValidPhoneNumber(form.phone)) {
+      return
+    }
+    if (!idempotencyKey.current) {
+      idempotencyKey.current = crypto.randomUUID()
+      sessionStorage.setItem('inpetu-helpdesk-idempotency-key', idempotencyKey.current)
+    }
+    setBusy(true)
+    try {
+      const created = await helpdeskRequest('/tickets', {
+        method: 'POST',
+        idempotency: idempotencyKey.current,
+        body: { ...form, name: form.name.trim(), email: form.email.trim().toLowerCase(), phone: normalizePhoneToE164(form.phone) },
+      })
+      const access = { code: created.code, token: created.token }
+      sessionStorage.setItem('inpetu-helpdesk-ticket', JSON.stringify(access))
+      setCredentials(access)
+      setTicketCode(access.code)
+      setTicketToken(access.token)
+      setIssuedTicket(access)
+      setStatus('Ticket criado. Guarde o código e o token, pois o token é mostrado uma única vez.')
+      setForm({ name: '', email: '', subject: '', motivo: '', phone: '', extension: '' })
+      idempotencyKey.current = null
+      sessionStorage.removeItem('inpetu-helpdesk-idempotency-key')
+    } catch (error) {
+      setStatusCode(error.code || '')
+      setStatus(error.status === 429 && error.retryAfter
+        ? `${error.message} Aguarde ${error.retryAfter} segundos.`
+        : error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function loadTicket(event) {
+    event?.preventDefault()
+    setStatus('')
+    setBusy(true)
+    try {
+      const ticket = await helpdeskRequest(`/tickets/${encodeURIComponent(ticketCode.trim())}`, { token: ticketToken.trim() })
+      setTrackedTicket({ code: ticketCode.trim(), token: ticketToken.trim(), ticket })
+      setMessages(ticket.messages || [])
+      lastMessageSeq.current = Math.max(0, ...(ticket.messages || []).map(message => message.seq))
+      setNewStaffReplies(0)
+      sessionStorage.setItem('inpetu-helpdesk-ticket', JSON.stringify({ code: ticketCode.trim(), token: ticketToken.trim() }))
+      setCredentials({ code: ticketCode.trim(), token: ticketToken.trim() })
+    } catch (error) {
+      setStatus(error.message)
+      setStatusCode(error.code || '')
+      setTrackedTicket(null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!trackedTicket) return undefined
+    let active = true
+    let polling = false
+    const poll = async () => {
+      if (!active || polling) return
+      polling = true
+      try {
+        const [fresh, latestTicket] = await Promise.all([
+          helpdeskRequest(
+            `/tickets/${encodeURIComponent(trackedTicket.code)}/messages?afterId=${lastMessageSeq.current}`,
+            { token: trackedTicket.token },
+          ),
+          helpdeskRequest(`/tickets/${encodeURIComponent(trackedTicket.code)}`, { token: trackedTicket.token }),
+        ])
+        if (active && fresh.length) {
+          lastMessageSeq.current = Math.max(lastMessageSeq.current, ...fresh.map(message => message.seq))
+          setMessages(current => mergeMessages(current, fresh))
+          const staffReplies = fresh.filter(message => message.authorType === 'STAFF').length
+          if (staffReplies) setNewStaffReplies(count => count + staffReplies)
+        }
+        if (active) setTrackedTicket(current => current
+          ? { ...current, ticket: { ...current.ticket, status: latestTicket.status, updatedAt: latestTicket.updatedAt } }
+          : current)
+      } catch {
+        if (active) setStatus('Não foi possível atualizar as mensagens. Acompanhamento será retomado automaticamente.')
+      } finally {
+        polling = false
+      }
+    }
+    const timer = window.setInterval(poll, 10000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [trackedTicket?.code, trackedTicket?.token])
+
+  async function sendReply(event) {
+    event.preventDefault()
+    if (!trackedTicket || !reply.trim()) return
+    setBusy(true)
+    setStatus('')
+    try {
+      const message = await helpdeskRequest(
+        `/tickets/${encodeURIComponent(trackedTicket.code)}/messages`,
+        { method: 'POST', token: trackedTicket.token, body: { body: reply.trim() } },
+      )
+      const ticket = await helpdeskRequest(`/tickets/${encodeURIComponent(trackedTicket.code)}`, {
+        token: trackedTicket.token,
+      })
+      setTrackedTicket(current => current ? { ...current, ticket } : current)
+      setMessages(current => mergeMessages(current, [...(ticket.messages || []), message]))
+      lastMessageSeq.current = Math.max(lastMessageSeq.current, message.seq,
+        ...(ticket.messages || []).map(item => item.seq))
+      setReply('')
+    } catch (error) {
+      setStatus(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <main className="inner-page help-page">
+    <div className="help-intro">
+      <Title as="h1">Vamos conversar<br /><em>sobre sua ideia?</em></Title>
+      <p>Abra um ticket e acompanhe toda a conversa neste site. Nenhum e-mail é enviado ao solicitante.</p>
+      <div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div>
+      <div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div>
+      <button type="button" className="table-action" onClick={() => { setMode(mode === 'create' ? 'track' : 'create'); setStatus(''); setIssuedTicket(null); setPhoneSubmitAttempted(false) }}>
+        {mode === 'create' ? 'Acompanhar meu ticket' : 'Abrir um novo ticket'}
+      </button>
+    </div>
+    {mode === 'create' ? <form className="help-form" onSubmit={submit}>
+      <div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>As respostas ficam disponíveis neste site.</small></div></div>
+      <label>Seu nome<input required maxLength={120} autoComplete="name" value={form.name} disabled={busy} onChange={event => updateForm('name', event.target.value)} /></label>
+      <label>Seu e-mail de contato<input required type="email" maxLength={254} autoComplete="email" value={form.email} disabled={busy} onChange={event => updateForm('email', event.target.value)} /><small>Não verificado e nunca usado para envio de e-mail.</small></label>
+      <label>Assunto<input required maxLength={160} value={form.subject} disabled={busy} onChange={event => updateForm('subject', event.target.value)} /></label>
+      <label>Telefone celular <span>(opcional)</span><PhoneInput value={form.phone} disabled={busy} validationAttempted={phoneSubmitAttempted} onChange={phone => updateForm('phone', phone)} /></label>
+      <label>Ramal <span>(opcional)</span><input inputMode="numeric" pattern="[0-9]{1,10}" maxLength={10} value={form.extension} disabled={busy} onChange={event => updateForm('extension', event.target.value)} /></label>
+      <label>Motivo<textarea required rows="5" maxLength="5000" value={form.motivo} disabled={busy} onChange={event => updateForm('motivo', event.target.value)} placeholder="Conte como podemos ajudar." /></label>
+      <p className="form-footnote">A chave de envio serve apenas para evitar tickets duplicados e não recupera o token. Se você perder a resposta de confirmação ou o token, não será possível acessar este ticket. Reenviar com uma chave nova pode criar outro ticket.</p>
+      {status && <p className={issuedTicket ? 'success-note' : 'form-message'} role={issuedTicket ? 'status' : 'alert'}>{status}</p>}
+      {statusCode === 'IDEMPOTENCY_REPLAY_TOKEN_UNAVAILABLE' && <button type="button" className="table-action" onClick={() => {
+      idempotencyKey.current = null
+      sessionStorage.removeItem('inpetu-helpdesk-idempotency-key')
+      setStatus('')
+      setStatusCode('')
+      }}>Iniciar um novo envio com outra chave</button>}
+      {issuedTicket && <div className="helpdesk-credentials" role="status"><strong>Código do ticket: {issuedTicket.code}</strong><label>Token de acesso<input readOnly value={issuedTicket.token} onFocus={event => event.target.select()} /></label><button type="button" className="table-action" onClick={() => { setMode('track'); setStatus('') }}>Acompanhar meu ticket</button></div>}
+      <Button type="submit" disabled={busy}>{busy ? 'Enviando...' : 'Enviar ticket'} <ArrowRight size={16} /></Button>
+      <p className="form-footnote"><ShieldCheck size={14} /> Guarde o código e o token. Eles são necessários para acessar o ticket sem uma conta.</p>
+    </form> : <section className="help-form helpdesk-track">
+      <div className="form-heading"><MessageCircle size={20} /><div><strong>Acompanhar meu ticket</strong><small>As novas respostas aparecem enquanto esta página estiver aberta.</small></div></div>
+      <form className="form-stack" onSubmit={loadTicket}>
+        <label>Código do ticket<input required autoComplete="off" value={ticketCode} onChange={event => setTicketCode(event.target.value)} /></label>
+        <label>Token de acesso<input required type="password" autoComplete="off" value={ticketToken} onChange={event => setTicketToken(event.target.value)} /></label>
+        {status && <p className="form-message" role="alert">{status}</p>}
+        <Button type="submit" disabled={busy}>{busy ? 'Consultando...' : 'Consultar ticket'}</Button>
+      </form>
+      {trackedTicket && <div className="helpdesk-thread">
+        <div className="helpdesk-thread-header"><strong>{trackedTicket.ticket.subject}</strong><span>{trackedTicket.ticket.status.replaceAll('_', ' ')}</span></div>
+        {newStaffReplies > 0 && <p className="success-note" role="status">Nova resposta da equipe disponível neste ticket.</p>}
+        <ol>{messages.map(message => <li key={message.seq} className={`helpdesk-message helpdesk-message-${message.authorType.toLowerCase()}`}><strong>{message.authorName}</strong><p>{message.body}</p><small>{new Date(message.createdAt).toLocaleString('pt-BR')}</small></li>)}</ol>
+        <form className="form-stack" onSubmit={sendReply}>
+          <label>Sua resposta<textarea required rows="4" maxLength="5000" value={reply} onChange={event => setReply(event.target.value)} /></label>
+          <Button type="submit" disabled={busy || !reply.trim()}>{busy ? 'Enviando...' : 'Enviar resposta'}</Button>
+        </form>
+      </div>}
+    </section>}
+  </main>
 }

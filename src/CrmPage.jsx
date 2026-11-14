@@ -20,10 +20,12 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const [registrationCreateOpen, setRegistrationCreateOpen] = useState(false)
   const [registrationCreateBusy, setRegistrationCreateBusy] = useState(false)
   const [registrationCreateError, setRegistrationCreateError] = useState('')
+  const [registrationPhoneSubmitAttempted, setRegistrationPhoneSubmitAttempted] = useState(false)
   const [newRegistration, setNewRegistration] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '' })
   const [reservationEditTarget, setReservationEditTarget] = useState(null)
   const [reservationEditForm, setReservationEditForm] = useState(null)
   const [reservationEditError, setReservationEditError] = useState('')
+  const [reservationPhoneSubmitAttempted, setReservationPhoneSubmitAttempted] = useState(false)
   const [reservationEditBusy, setReservationEditBusy] = useState(false)
   const [reservationEditNow, setReservationEditNow] = useState(() => new Date())
   const [negotiationTarget, setNegotiationTarget] = useState(null)
@@ -81,14 +83,16 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const [ticketStatusFilter, setTicketStatusFilter] = useState('Todas')
   const [ticketQuery, setTicketQuery] = useState('')
   const [tickets, setTickets] = useState([])
-  const [selectedTicket, setSelectedTicket] = useState(null)
+  const [helpdeskTickets, setHelpdeskTickets] = useState([])
+  const [selectedHelpdeskTicket, setSelectedHelpdeskTicket] = useState(null)
   const [crmDataError, setCrmDataError] = useState('')
   const [auditItems, setAuditItems] = useState([])
   const [auditQuery, setAuditQuery] = useState('')
   const [auditActionFilter, setAuditActionFilter] = useState('Todas')
   const [crmSectionErrors, setCrmSectionErrors] = useState({})
   const extensionNavigation = optionalExtensions.flatMap(extension => extension.navigationItems?.(user) || [])
-  const nav = [{ name: 'Visão geral', icon: LayoutDashboard }, { name: 'Reservas', icon: CalendarDays }, { name: 'Cadastros', icon: Users }, { name: 'Espaços', icon: DoorOpen }, { name: 'Atendimento', icon: CircleHelp }, ...extensionNavigation, { name: 'Auditoria', icon: ListChecks }, ...(user?.perfil === 1 ? [{ name: 'Equipe', icon: ShieldCheck }] : [])]
+  const hasHelpdeskAccess = [1, 3].includes(Number(user?.perfil))
+  const nav = [{ name: 'Visão geral', icon: LayoutDashboard }, { name: 'Reservas', icon: CalendarDays }, { name: 'Cadastros', icon: Users }, { name: 'Espaços', icon: DoorOpen }, ...(hasHelpdeskAccess ? [{ name: 'Atendimento', icon: CircleHelp }] : []), ...extensionNavigation, { name: 'Auditoria', icon: ListChecks }, ...(user?.perfil === 1 ? [{ name: 'Equipe', icon: ShieldCheck }] : [])]
   useEffect(() => {
     if (!mobileSidebarOpen) {
       if (mobileSidebarWasOpen.current) {
@@ -148,6 +152,9 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     applyThemePreference(crmTheme, false)
     return () => { delete document.body.dataset.crmTheme }
   }, [crmTheme])
+  useEffect(() => {
+    if (!hasHelpdeskAccess && section === 'Atendimento') setSection('Visão geral')
+  }, [hasHelpdeskAccess, section])
   function toggleTheme() {
     const nextTheme = crmTheme === 'dark' ? 'light' : 'dark'
     applyThemePreference(nextTheme)
@@ -163,7 +170,15 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const notify = text => { setToast(text); window.setTimeout(() => setToast(''), 3200) }
   useEffect(() => {
     if (!user) return
-    Promise.allSettled([request('/reservas'), request('/usuarios'), request('/organizacoes'), request('/duvidas'), request('/auditoria')]).then(results => {
+    const helpdeskAccess = [1, 3].includes(Number(user.perfil))
+    Promise.allSettled([
+      request('/reservas'),
+      request('/usuarios'),
+      request('/organizacoes'),
+      helpdeskAccess ? request('/duvidas') : Promise.resolve([]),
+      request('/auditoria'),
+      helpdeskAccess ? request('/helpdesk/staff/queue?limit=100') : Promise.resolve([]),
+    ]).then(results => {
       const errors = {}
       const getResult = (index, section) => {
         const result = results[index]
@@ -176,6 +191,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       const organizations = getResult(2, 'as organizações')
       const questions = getResult(3, 'as mensagens de atendimento')
       const logs = getResult(4, 'a auditoria')
+      const helpdeskQueue = getResult(5, 'os tickets do Help Desk')
       const availableUsers = users || []
       const availableOrganizations = organizations || []
       const orgById = new Map(availableOrganizations.map(org => [org.idOrganizacao, org]))
@@ -191,7 +207,10 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       }
       if (questions) {
         setTickets(questions)
-        setSelectedTicket(current => questions.find(question => question.idDuvida === current?.idDuvida) || questions[0] || null)
+      }
+      if (helpdeskQueue) {
+        setHelpdeskTickets(helpdeskQueue)
+        setSelectedHelpdeskTicket(current => helpdeskQueue.find(ticket => ticket.id === current?.id) || helpdeskQueue[0] || null)
       }
       if (logs) setAuditItems(logs.map(log => {
         const affectedUser = log.tabelaAfetada === 'usuario' ? userById.get(log.idRegistroAfetado) : null
@@ -208,6 +227,69 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       setCrmSectionErrors(errors)
     })
   }, [user, spaces])
+  useEffect(() => {
+    if (!user || !hasHelpdeskAccess) return undefined
+    let active = true
+    let refreshing = false
+    const refreshHelpdeskQueue = async () => {
+      if (!active || refreshing) return
+      refreshing = true
+      try {
+        const queue = await request('/helpdesk/staff/queue?limit=100')
+        if (!active) return
+        if (!Array.isArray(queue)) throw new Error('A API retornou uma lista inválida.')
+        setHelpdeskTickets(queue)
+        setSelectedHelpdeskTicket(current => {
+          if (!current) return queue[0] || null
+          const currentRow = queue.find(ticket => ticket.id === current.id)
+          return currentRow ? { ...currentRow, messages: current.messages || currentRow.messages } : queue[0] || null
+        })
+        setCrmSectionErrors(current => {
+          const next = { ...current }
+          delete next['os tickets do Help Desk']
+          return next
+        })
+      } catch (error) {
+        if (active) {
+          setCrmSectionErrors(current => ({
+            ...current,
+            'os tickets do Help Desk': `Não foi possível atualizar os tickets do Help Desk: ${error.message || 'erro inesperado.'}`,
+          }))
+        }
+      } finally {
+        refreshing = false
+      }
+    }
+    const timer = window.setInterval(refreshHelpdeskQueue, 15000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [user, hasHelpdeskAccess])
+  useEffect(() => {
+    const ticketId = selectedHelpdeskTicket?.id
+    if (!user || !hasHelpdeskAccess || section !== 'Atendimento' || !ticketId) return undefined
+    let active = true
+    let refreshing = false
+    const refreshSelectedTicket = async () => {
+      if (!active || refreshing) return
+      refreshing = true
+      try {
+        const details = await request(`/helpdesk/staff/tickets/${ticketId}`)
+        if (!active) return
+        setSelectedHelpdeskTicket(current => current?.id === ticketId ? details : current)
+        setHelpdeskTickets(current => current.map(ticket => ticket.id === ticketId ? details : ticket))
+      } catch (error) {
+        if (active) {
+          setCrmSectionErrors(current => ({
+            ...current,
+            'os tickets do Help Desk': `Não foi possível atualizar o ticket selecionado: ${error.message || 'erro inesperado.'}`,
+          }))
+        }
+      } finally {
+        refreshing = false
+      }
+    }
+    const timer = window.setInterval(refreshSelectedTicket, 10000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [user, hasHelpdeskAccess, section, selectedHelpdeskTicket?.id])
   useEffect(() => {
     if (!user) return
     let active = true
@@ -309,6 +391,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   }
     function editReservation(item) {
       setReservationEditTarget(item)
+      setReservationPhoneSubmitAttempted(false)
       setReservationEditForm({
         tituloEvento: item.tituloEvento,
         descricaoFinalidade: item.descricaoFinalidade || '',
@@ -323,6 +406,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     }
     async function saveReservationEdit(event) {
       event.preventDefault()
+      setReservationPhoneSubmitAttempted(true)
       if (!reservationEditTarget || !reservationEditForm || reservationEditBusy) return
       const validation = getReservationStartError(reservationEditForm.dataReserva, reservationEditForm.horarioInicio)
       if (validation) {
@@ -330,7 +414,6 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
         return
       }
       if (hasPhoneInput(reservationEditForm.telefoneContato) && !isValidPhoneNumber(reservationEditForm.telefoneContato)) {
-        setReservationEditError('Informe DDI, DDD e número válidos para contato sobre a reserva.')
         return
       }
       setReservationEditBusy(true)
@@ -429,9 +512,9 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   }
   async function createRegistration(event) {
     event.preventDefault()
+    setRegistrationPhoneSubmitAttempted(true)
     if (registrationCreateBusy) return
     if (hasPhoneInput(newRegistration.telefone) && !isValidPhoneNumber(newRegistration.telefone)) {
-      setRegistrationCreateError('Informe DDI, DDD e número válidos.')
       return
     }
     setRegistrationCreateBusy(true)
@@ -460,6 +543,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       }, ...items])
       setClientUsers(items => [{ ...created, organizacao: newRegistration.organizacao.trim() }, ...items])
       setNewRegistration({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '' })
+      setRegistrationPhoneSubmitAttempted(false)
       setRegistrationCreateOpen(false)
       notify('Cadastro criado e registrado na auditoria.')
     } catch (error) {
@@ -493,9 +577,6 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     return normalized
   }
   async function saveClientProfile(client, form) {
-    if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) {
-      throw new Error('Informe DDI, DDD e número válidos.')
-    }
     const updated = await request(`/usuarios/${client.idUsuario}/cadastro`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -827,7 +908,62 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     link.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
-  async function sendAnswer() { if (!answer.trim() || !selectedTicket) return; try { await request(`/duvidas/${selectedTicket.idDuvida}/responder`, { method: 'POST', body: JSON.stringify({ resposta: answer }) }); setTickets(items => items.map(ticket => ticket.idDuvida === selectedTicket.idDuvida ? { ...ticket, respostaEquipe: answer, statusAtendimento: 'Respondida' } : ticket)); setSelectedTicket(current => current?.idDuvida === selectedTicket.idDuvida ? { ...current, respostaEquipe: answer, statusAtendimento: 'Respondida' } : current); setAnswer(''); notify('Resposta registrada no chamado.') } catch (error) { notify(error.message) } }
+  function applyHelpdeskTicket(ticket) {
+    setSelectedHelpdeskTicket(ticket)
+    setHelpdeskTickets(items => items.map(item => item.id === ticket.id ? ticket : item))
+  }
+  async function openHelpdeskTicket(ticket) {
+    setSelectedHelpdeskTicket(ticket)
+    setAnswer('')
+    try {
+      const details = await request(`/helpdesk/staff/tickets/${ticket.id}`)
+      setSelectedHelpdeskTicket(current => current?.id === details.id ? details : current)
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+  async function claimHelpdeskTicket() {
+    if (!selectedHelpdeskTicket) return
+    try {
+      const updated = await request(`/helpdesk/staff/tickets/${selectedHelpdeskTicket.id}/claim`, { method: 'POST' })
+      applyHelpdeskTicket(updated)
+      notify('Ticket assumido.')
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+  async function sendHelpdeskReply() {
+    if (!answer.trim() || !selectedHelpdeskTicket) return
+    try {
+      const updated = await request(`/helpdesk/staff/tickets/${selectedHelpdeskTicket.id}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ body: answer.trim() }),
+      })
+      applyHelpdeskTicket(updated)
+      setAnswer('')
+      notify('Resposta registrada no ticket.')
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+  async function resolveHelpdeskTicket() {
+    if (!selectedHelpdeskTicket) return
+    try {
+      applyHelpdeskTicket(await request(`/helpdesk/staff/tickets/${selectedHelpdeskTicket.id}/resolve`, { method: 'POST' }))
+      notify('Ticket resolvido.')
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+  async function reopenHelpdeskTicket() {
+    if (!selectedHelpdeskTicket) return
+    try {
+      applyHelpdeskTicket(await request(`/helpdesk/staff/tickets/${selectedHelpdeskTicket.id}/reopen`, { method: 'POST' }))
+      notify('Ticket reaberto.')
+    } catch (error) {
+      notify(error.message)
+    }
+  }
   const pending = reservations.filter(item => item.statusReserva === 'Pendente')
   const managedUsers = [...staff, ...clientUsers]
     .sort((left, right) => (left.nomeCompleto || '').localeCompare(right.nomeCompleto || '', 'pt-BR'))
@@ -851,30 +987,42 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     setDashboardDate(localDateValue(nextDate))
   }
   const isDashboardToday = dashboardDate === todayKey
-  const pendingQuestions = tickets.filter(ticket => ticket.statusAtendimento !== 'Respondida')
+  const pendingQuestions = helpdeskTickets.filter(ticket => ticket.status !== 'RESOLVIDO')
   const filteredPartners = partners.filter(p =>
     (partnerScope === 'all' || !p.persona) &&
     `${p.name} ${p.contact} ${p.email}`.toLowerCase().includes(search.toLowerCase())
   )
   const ticketSearchQuery = ticketQuery.trim().toLocaleLowerCase('pt-BR')
-  const filteredTickets = tickets.filter(ticket => {
-    const matchesStatus = ticketStatusFilter === 'Todas' ||
-      (ticketStatusFilter === 'Novas' ? ticket.statusAtendimento !== 'Respondida' : ticket.statusAtendimento === 'Respondida')
-    const searchableText = `${ticket.emailContato || ''} ${ticket.telefoneContato || ''} ${ticket.mensagemDuvida || ''}`
+  const filteredTickets = helpdeskTickets.filter(ticket => {
+    const matchesStatus = ticketStatusFilter === 'Todas'
+      || (ticketStatusFilter === 'Abertos' && ticket.status === 'ABERTO')
+      || (ticketStatusFilter === 'Em atendimento' && ticket.status === 'EM_ATENDIMENTO')
+      || (ticketStatusFilter === 'Aguardando cliente' && ticket.status === 'AGUARDANDO_CLIENTE')
+      || (ticketStatusFilter === 'Resolvidos' && ticket.status === 'RESOLVIDO')
+    const searchableText = `${ticket.name || ''} ${ticket.email || ''} ${ticket.phone || ''} ${ticket.subject || ''} ${ticket.messages?.map(message => message.body).join(' ') || ''}`
       .toLocaleLowerCase('pt-BR')
     return matchesStatus && (!ticketSearchQuery || searchableText.includes(ticketSearchQuery))
   })
-  const visibleSelectedTicket = filteredTickets.find(ticket => ticket.idDuvida === selectedTicket?.idDuvida) || null
+  const visibleSelectedTicket = filteredTickets.find(ticket => ticket.id === selectedHelpdeskTicket?.id)
+    ? selectedHelpdeskTicket
+    : filteredTickets[0] || null
+  const helpdeskStatusLabels = {
+    ABERTO: 'Aberto',
+    EM_ATENDIMENTO: 'Em atendimento',
+    AGUARDANDO_CLIENTE: 'Aguardando cliente',
+    RESOLVIDO: 'Resolvido',
+    REABERTO: 'Reaberto',
+  }
   const filteredAuditItems = auditItems.filter(item =>
     (auditActionFilter === 'Todas' || item.action === auditActionFilter) &&
     `${item.time} ${item.user} ${item.action} ${item.target} ${item.detail}`.toLowerCase().includes(auditQuery.trim().toLowerCase())
   )
   const auditActions = [...new Set(auditItems.map(item => item.action))]
   const errorsForSection = {
-    'Visão geral': ['as reservas', 'as mensagens de atendimento'],
+    'Visão geral': ['as reservas', 'os tickets do Help Desk'],
     Reservas: ['as reservas'],
     Cadastros: ['os usuários', 'as organizações'],
-    Atendimento: ['as mensagens de atendimento'],
+    Atendimento: ['os tickets do Help Desk'],
     Auditoria: ['a auditoria'],
   }[section] || []
   if (!user) return <div className="crm-login" role="main"><div className="crm-login-visual"><Logo variant="institutionalDark" /><div><Title as="h1">O ecossistema,<br /><em>em movimento.</em></Title><p>Gestão inteligente dos encontros e espaços do Lote 73.</p><div className="crm-location icon-text"><MapPin size={17} />Sapiens Parque · Florianópolis</div></div><small>AMBIENTE DE GESTÃO INTERNA</small></div><div className="crm-login-form"><Title as="h2">Acesso ao painel</Title><p>Entre com sua conta da equipe para gerenciar reservas, espaços e cadastros.</p><LoginInline onLogin={setUser} /></div></div>
@@ -897,7 +1045,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
         </MenuItems>
       </Menu>
     </aside>
-    <main className="crm-main"><header className="crm-topbar"><button ref={sidebarToggleRef} type="button" className="crm-sidebar-toggle" aria-label="Alternar menu lateral" aria-expanded={window.matchMedia?.('(max-width: 767px)').matches ? mobileSidebarOpen : !sidebarCollapsed} aria-controls="crm-sidebar" onClick={toggleSidebar}><MenuIcon size={19} /></button><a href="/?view=home" className="crm-mobile-logo" aria-label="Ir para o início do site"><Logo variant={crmTheme === 'dark' ? 'horizontalDark' : 'horizontalLight'} /></a><div className="breadcrumbs"><span>InPETU Connect</span><span>/</span><strong>{section}</strong></div><label className="global-search"><Search size={16} /><input placeholder="Buscar em tudo" value={search} onChange={e => setSearch(e.target.value)} /></label><NotificationCenter user={user} routeKey={section} onNavigate={destination => { setSection(destination === 'support' ? 'Atendimento' : 'Reservas'); setMobileSidebarOpen(false) }} /><button type="button" className="crm-icon crm-help-button" aria-label="Ajuda e atendimento" title="Ajuda e atendimento" onClick={() => setSection('Atendimento')}><CircleHelp size={18} /></button><button type="button" className="crm-icon crm-theme-toggle" aria-label={crmTheme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'} aria-pressed={crmTheme === 'dark'} onClick={toggleTheme}>{crmTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button></header>
+    <main className="crm-main"><header className="crm-topbar"><button ref={sidebarToggleRef} type="button" className="crm-sidebar-toggle" aria-label="Alternar menu lateral" aria-expanded={window.matchMedia?.('(max-width: 767px)').matches ? mobileSidebarOpen : !sidebarCollapsed} aria-controls="crm-sidebar" onClick={toggleSidebar}><MenuIcon size={19} /></button><a href="/?view=home" className="crm-mobile-logo" aria-label="Ir para o início do site"><Logo variant={crmTheme === 'dark' ? 'horizontalDark' : 'horizontalLight'} /></a><div className="breadcrumbs"><span>InPETU Connect</span><span>/</span><strong>{section}</strong></div><label className="global-search"><Search size={16} /><input placeholder="Buscar em tudo" value={search} onChange={e => setSearch(e.target.value)} /></label><NotificationCenter user={user} routeKey={section} onNavigate={destination => { if (destination !== 'support' || hasHelpdeskAccess) setSection(destination === 'support' ? 'Atendimento' : 'Reservas'); setMobileSidebarOpen(false) }} />{hasHelpdeskAccess && <button type="button" className="crm-icon crm-help-button" aria-label="Ajuda e atendimento" title="Ajuda e atendimento" onClick={() => setSection('Atendimento')}><CircleHelp size={18} /></button>}<button type="button" className="crm-icon crm-theme-toggle" aria-label={crmTheme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'} aria-pressed={crmTheme === 'dark'} onClick={toggleTheme}>{crmTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button></header>
       <ProfileDialog open={profileDetailsOpen} close={() => setProfileDetailsOpen(false)} user={user} onUserUpdate={updated => { const next = omitPersona({ ...user, ...updated }); storeUser(next); setUser(next); setStaff(items => items.map(person => person.idUsuario === next.idUsuario ? { ...person, ...updated } : person)); setClientUsers(items => items.map(person => person.idUsuario === next.idUsuario ? { ...person, ...updated } : person)) }} />
       <div className="crm-content">
         {crmDataError && <div className="form-message" role="alert">{crmDataError}</div>}
@@ -916,7 +1064,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
             <Kpi icon={CalendarDays} label="Reservas no dia" value={String(selectedReservations.length).padStart(2, '0')} change={`${occupiedSpaces.size} espaços com agenda nesta data`} accent="mint" />
             <Kpi icon={Clock3} label="Aguardando aprovação" value={String(pending.length).padStart(2, '0')} change="Precisam da sua atenção" accent="yellow" />
             <Kpi icon={DoorOpen} label="Ocupação do Lote 73" value={`${occupancyRate}%`} change={`${occupiedSpaces.size} de ${activeSpaces.length} espaços ocupados nesta data`} accent="blue" />
-            <Kpi icon={MessageCircle} label="Dúvidas em aberto" value={String(pendingQuestions.length).padStart(2, '0')} change={`${tickets.length} mensagens recebidas`} accent="coral" />
+            <Kpi icon={MessageCircle} label="Tickets em aberto" value={String(pendingQuestions.length).padStart(2, '0')} change={`${helpdeskTickets.length} tickets recebidos`} accent="coral" />
           </div>
           <div className="dashboard-columns">
             <section className="crm-panel conflict-panel"><div className="panel-heading"><div className="conflict-heading"><Title as="h2">Solicitações pendentes</Title><span className="conflict-count">{selectedPending.length}</span></div><button type="button" className="subtle-action" onClick={() => setSection('Reservas')}>Ver todas <ArrowRight size={15} /></button></div>{selectedPending.length ? selectedPending.map(item => <div className="conflict-card" key={item.idReserva}><strong>{item.tituloEvento}</strong><span>{item.espaco} · {item.solicitante}</span></div>) : <div className="empty-inline">Nenhuma solicitação pendente nesta data.</div>}</section>
@@ -945,7 +1093,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
           </div>
         </>}
         {section === 'Cadastros' && <>
-          <CrmTitle title="Cadastros e ficha do cliente" description="Consulte dados, histórico e ações de cada cadastro em uma ficha única." action={<Button icon={Plus} onClick={() => { setRegistrationCreateError(''); setRegistrationCreateOpen(true) }}>Novo cadastro</Button>} />
+          <CrmTitle title="Cadastros e ficha do cliente" description="Consulte dados, histórico e ações de cada cadastro em uma ficha única." action={<Button icon={Plus} onClick={() => { setRegistrationCreateError(''); setRegistrationPhoneSubmitAttempted(false); setRegistrationCreateOpen(true) }}>Novo cadastro</Button>} />
           <div className="crm-panel registration-panel">
             <div className="panel-heading registration-toolbar">
               <div className="segmented-control registration-filters">
@@ -987,32 +1135,31 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
           <div className="privacy-callout"><ShieldCheck size={18} /><span><strong>Dados internos</strong><small>Os dados detalhados do cadastro ficam disponíveis apenas para a equipe autorizada na ficha do solicitante.</small></span></div>
         </>}
         {section === 'Espaços' && <><CrmTitle title="Gestão de espaços" description="Mantenha o catálogo de ambientes atualizado e disponível." action={<Button icon={Plus} onClick={() => setSpaceModal(true)}>Novo espaço</Button>} /><div className="crm-panel"><table className="data-table"><thead><tr><th>Espaço</th><th>Tipo</th><th>Capacidade</th><th>Disponibilidade</th><th>Ações</th></tr></thead><tbody>{spaces.map(space => <tr key={space.idEspaco}><td><strong>{space.nomeEspaco}</strong><small>{space.descricao || space.equipamentosDisponiveis}</small></td><td>{space.tipoEspaco}</td><td>{space.capacidadePessoas} pessoas</td><td>{space.ativo !== false ? <span className="availability-text"><i /> Disponível</span> : <span className="availability-text availability-unavailable"><i /> Indisponível<small>{space.motivoIndisponibilidade}</small><small>{unavailableDeadlineLabel(space.dataPrevisaoRetorno)}</small></span>}</td><td><div className="space-management-actions"><button type="button" className="table-action" onClick={() => openEditSpace(space)}>Editar</button><button className={`toggle ${space.ativo !== false ? 'toggle-on' : ''}`} aria-label={`${space.ativo !== false ? 'Inativar' : 'Reativar'} ${space.nomeEspaco}`} aria-pressed={space.ativo !== false} onClick={() => toggleSpace(space)}><span /></button></div></td></tr>)}</tbody></table></div></>}
-        {section === 'Atendimento' && <>
-          <CrmTitle
-            title="Mensagens recebidas"
-            description="Contatos enviados pelo Fale conosco. Responda por aqui; a resposta segue por e-mail."
-          />
-          <div className={`support-grid support-inbox ${tickets.length ? '' : 'support-inbox-empty'}`}>
+        {section === 'Atendimento' && hasHelpdeskAccess && <>
+          <CrmTitle title="Atendimento" description="Responda aos tickets dentro do site. Nenhuma resposta é enviada por e-mail." />
+          <div className={`support-grid support-inbox ${helpdeskTickets.length ? '' : 'support-inbox-empty'}`}>
             <div className="crm-panel support-list">
               <div className="support-toolbar">
                 <strong className="support-new-count" aria-live="polite">
-                  {crmSectionErrors['as mensagens de atendimento']
+                  {crmSectionErrors['os tickets do Help Desk']
                     ? 'Contagem indisponível'
-                    : `${pendingQuestions.length} ${pendingQuestions.length === 1 ? 'nova' : 'novas'}`}
+                    : `${pendingQuestions.length} em aberto`}
                 </strong>
                 <label className="ticket-filter">Status
-                  <select aria-label="Filtrar mensagens por status" value={ticketStatusFilter} onChange={event => setTicketStatusFilter(event.target.value)}>
+                  <select aria-label="Filtrar tickets por status" value={ticketStatusFilter} onChange={event => setTicketStatusFilter(event.target.value)}>
                     <option>Todas</option>
-                    <option>Novas</option>
-                    <option>Respondidas</option>
+                    <option>Abertos</option>
+                    <option>Em atendimento</option>
+                    <option>Aguardando cliente</option>
+                    <option>Resolvidos</option>
                   </select>
                 </label>
                 <label className="ticket-search">
                   <Search size={16} aria-hidden="true" />
                   <input
                     type="search"
-                    aria-label="Buscar mensagens recebidas"
-                    placeholder="Buscar por e-mail, telefone ou mensagem"
+                    aria-label="Buscar tickets"
+                    placeholder="Buscar por nome, contato ou mensagem"
                     value={ticketQuery}
                     onChange={event => setTicketQuery(event.target.value)}
                   />
@@ -1021,62 +1168,72 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
               <div className="support-list-items">
                 {filteredTickets.length ? filteredTickets
                   .slice()
-                  .sort((left, right) => new Date(right.dataEnvio).getTime() - new Date(left.dataEnvio).getTime())
+                  .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
                   .map(ticket => {
-                    const email = ticket.emailContato || 'E-mail não informado'
-                    return (
-                      <button
-                        type="button"
-                        className={`ticket-row ${visibleSelectedTicket?.idDuvida === ticket.idDuvida ? 'ticket-selected' : ''}`}
-                        key={ticket.idDuvida}
-                        aria-pressed={visibleSelectedTicket?.idDuvida === ticket.idDuvida}
-                        onClick={() => setSelectedTicket(ticket)}
-                      >
-                        <Avatar
-                          user={clientUsers.find(person => person.email?.toLowerCase() === ticket.emailContato?.toLowerCase())}
-                          nome={email.split('@')[0].split(/[._-]/).join(' ')}
-                          tamanho={36}
-                          className="ticket-avatar"
-                        />
-                        <span className="ticket-row-content">
-                          <strong>{email}</strong>
-                          <small>{ticket.mensagemDuvida}</small>
-                          <em>{ticket.statusAtendimento === 'Respondida' ? 'Respondida' : 'Nova'} · {new Date(ticket.dataEnvio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</em>
-                        </span>
-                      </button>
-                    )
-                  }) : tickets.length ? (
-                  <div className="empty-state support-empty">
-                    <Mail size={24} />
-                    <strong>Nenhuma mensagem encontrada</strong>
-                  </div>
-                ) : !crmSectionErrors['as mensagens de atendimento'] ? (
-                  <div className="empty-state support-empty">
-                    <Mail size={24} />
-                    <strong>Nenhuma mensagem recebida</strong>
-                  </div>
+                    const displayName = ticket.name || 'Solicitante'
+                    const initialMessage = ticket.messages?.[0]?.body || ticket.subject
+                    return <button
+                      type="button"
+                      className={`ticket-row ${visibleSelectedTicket?.id === ticket.id ? 'ticket-selected' : ''}`}
+                      key={ticket.id}
+                      aria-pressed={visibleSelectedTicket?.id === ticket.id}
+                      onClick={() => openHelpdeskTicket(ticket)}
+                    >
+                      <Avatar
+                        user={clientUsers.find(person => person.email?.toLowerCase() === ticket.email?.toLowerCase())}
+                        nome={displayName}
+                        tamanho={36}
+                        className="ticket-avatar"
+                      />
+                      <span className="ticket-row-content">
+                        <strong>{displayName}</strong>
+                        <small>{initialMessage}</small>
+                        <em>{helpdeskStatusLabels[ticket.status] || ticket.status} · {new Date(ticket.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</em>
+                      </span>
+                    </button>
+                  }) : helpdeskTickets.length ? (
+                  <div className="empty-state support-empty"><MessageCircle size={24} /><strong>Nenhum ticket encontrado</strong></div>
+                ) : !crmSectionErrors['os tickets do Help Desk'] ? (
+                  <div className="empty-state support-empty"><MessageCircle size={24} /><strong>Nenhum ticket recebido</strong></div>
                 ) : null}
               </div>
             </div>
-            {tickets.length > 0 && <div className="crm-panel ticket-detail">
+            {helpdeskTickets.length > 0 && <div className="crm-panel ticket-detail">
               {visibleSelectedTicket ? <>
                 <div className="ticket-detail-head">
                   <div>
-                    <span className={`status-pill ${visibleSelectedTicket.statusAtendimento === 'Respondida' ? 'status-confirmed' : 'status-pending'}`}>
-                      <i />{visibleSelectedTicket.statusAtendimento === 'Respondida' ? 'Respondida' : 'Nova'}
+                    <span className={`status-pill ${visibleSelectedTicket.status === 'RESOLVIDO' ? 'status-confirmed' : 'status-pending'}`}>
+                      <i />{helpdeskStatusLabels[visibleSelectedTicket.status] || visibleSelectedTicket.status}
                     </span>
-                    <small>{new Date(visibleSelectedTicket.dataEnvio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</small>
+                    <small>{new Date(visibleSelectedTicket.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</small>
                   </div>
-                  {visibleSelectedTicket.caminhoAnexo && <a className="table-action" href={`${API}/duvidas/${visibleSelectedTicket.idDuvida}/anexo`} target="_blank" rel="noreferrer"><Download size={15} /> Ver anexo</a>}
+                  <small>{visibleSelectedTicket.assignedUserName ? `Responsável: ${visibleSelectedTicket.assignedUserName}` : 'Sem responsável'}</small>
                 </div>
-                <Title as="h2">{visibleSelectedTicket.emailContato || 'E-mail não informado'}</Title>
-                {visibleSelectedTicket.telefoneContato && <p className="ticket-phone"><strong>Telefone para retorno:</strong> {visibleSelectedTicket.telefoneContato}</p>}
-                <p className="ticket-message">{visibleSelectedTicket.mensagemDuvida}</p>
-                <label className="ticket-answer">Sua resposta por e-mail
-                  <textarea rows="5" value={answer} onChange={event => setAnswer(event.target.value)} placeholder="Escreva uma resposta para enviar por e-mail..." />
-                </label>
-                <Button disabled={!answer.trim()} onClick={sendAnswer}><Mail size={16} /> Enviar resposta por e-mail</Button>
-              </> : <div className="empty-state support-empty"><Mail size={24} /><strong>Selecione uma mensagem</strong></div>}
+                <Title as="h2">{visibleSelectedTicket.name}</Title>
+                <p className="ticket-phone"><strong>E-mail de contato não verificado:</strong> {visibleSelectedTicket.email}</p>
+                {visibleSelectedTicket.phone && <p className="ticket-phone"><strong>Telefone celular:</strong> {visibleSelectedTicket.phone}{visibleSelectedTicket.extension ? ` · ramal ${visibleSelectedTicket.extension}` : ''}</p>}
+                <p className="ticket-message"><strong>{visibleSelectedTicket.subject}</strong></p>
+                <div className="helpdesk-staff-thread" aria-label="Histórico de mensagens">
+                  {visibleSelectedTicket.messages?.map(message => <article key={message.seq} className="helpdesk-staff-message">
+                    <strong>{message.authorName}</strong>
+                    <p>{message.body}</p>
+                    <small>{new Date(message.createdAt).toLocaleString('pt-BR')}</small>
+                  </article>)}
+                </div>
+                {(visibleSelectedTicket.status === 'ABERTO' || visibleSelectedTicket.status === 'REABERTO') && !visibleSelectedTicket.assignedUserId
+                  ? <Button onClick={claimHelpdeskTicket}>Assumir ticket</Button>
+                  : visibleSelectedTicket.status === 'RESOLVIDO'
+                    ? <Button onClick={reopenHelpdeskTicket}>Reabrir ticket</Button>
+                    : visibleSelectedTicket.assignedUserId === user.idUsuario && ['EM_ATENDIMENTO', 'AGUARDANDO_CLIENTE'].includes(visibleSelectedTicket.status) && <>
+                      <label className="ticket-answer">Resposta no site
+                        <textarea rows="5" value={answer} onChange={event => setAnswer(event.target.value)} placeholder="Escreva uma resposta ao solicitante." />
+                      </label>
+                      <div className="helpdesk-staff-actions">
+                        <Button disabled={!answer.trim()} onClick={sendHelpdeskReply}><MessageCircle size={16} /> Enviar resposta</Button>
+                        <button type="button" className="table-action" onClick={resolveHelpdeskTicket}>Resolver ticket</button>
+                      </div>
+                    </>}
+              </> : <div className="empty-state support-empty"><MessageCircle size={24} /><strong>Selecione um ticket</strong></div>}
             </div>}
           </div>
         </>}
@@ -1111,7 +1268,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
         <label>Descrição e finalidade<textarea required rows={3} value={reservationEditForm.descricaoFinalidade} onChange={event => setReservationEditForm({ ...reservationEditForm, descricaoFinalidade: event.target.value })} /></label>
         <section className="reservation-contact-card" aria-label="Contato desta reserva">
           <strong>Contato desta reserva</strong>
-          <label>Telefone para contato ou alteração<PhoneInput value={reservationEditForm.telefoneContato} onChange={telefoneContato => setReservationEditForm({ ...reservationEditForm, telefoneContato })} /><small>Celular informado pelo solicitante para assuntos desta reserva.</small></label>
+          <label>Telefone para contato ou alteração<PhoneInput value={reservationEditForm.telefoneContato} validationAttempted={reservationPhoneSubmitAttempted} onChange={telefoneContato => setReservationEditForm({ ...reservationEditForm, telefoneContato })} /><small>Celular informado pelo solicitante para assuntos desta reserva.</small></label>
         </section>
         <label>Espaço<select value={reservationEditForm.idEspaco} onChange={event => setReservationEditForm({ ...reservationEditForm, idEspaco: event.target.value })}>{spaces.map(space => <option key={space.idEspaco} value={space.idEspaco}>{space.nomeEspaco}</option>)}</select></label>
         <label>Data<input required type="date" min={reservationEditLocalTime.date} aria-invalid={Boolean(reservationEditValidation && reservationEditForm.dataReserva < reservationEditLocalTime.date)} value={reservationEditForm.dataReserva} onChange={event => { setReservationEditForm({ ...reservationEditForm, dataReserva: event.target.value }); setReservationEditError('') }} /></label>
@@ -1128,14 +1285,14 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       <Button icon={Check} disabled={!negotiationNote.trim() || negotiationBusy} onClick={recordNegotiationAndApprove}>{negotiationBusy ? 'Registrando...' : 'Registrar negociação e aprovar'}</Button>
     </Modal>
     <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onRole={saveRole} canManageRole={user.perfil === 1 && clientProfile?.idUsuario !== user.idUsuario} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
-    <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError('') } }} title="Criar cadastro para uma organização">
+    <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError(''); setRegistrationPhoneSubmitAttempted(false) } }} title="Criar cadastro para uma organização">
       <form className="form-stack" onSubmit={createRegistration}>
         <p className="access-intro">Cadastre a organização e uma pessoa responsável. A pessoa entrará usando e-mail e senha.</p>
         <label>Nome da organização<input required maxLength={100} value={newRegistration.organizacao} onChange={event => setNewRegistration({ ...newRegistration, organizacao: event.target.value })} /></label>
         <label>Nome e sobrenome do responsável<input required maxLength={100} value={newRegistration.nomeCompleto} onChange={event => setNewRegistration({ ...newRegistration, nomeCompleto: event.target.value })} /></label>
         <label>E-mail<input required type="email" maxLength={100} value={newRegistration.email} onChange={event => setNewRegistration({ ...newRegistration, email: event.target.value })} /></label>
         <div className="form-row">
-          <label>Telefone (opcional)<PhoneInput value={newRegistration.telefone} onChange={telefone => setNewRegistration({ ...newRegistration, telefone })} /></label>
+          <label>Telefone (opcional)<PhoneInput value={newRegistration.telefone} validationAttempted={registrationPhoneSubmitAttempted} onChange={telefone => setNewRegistration({ ...newRegistration, telefone })} /></label>
           <label>Cargo ou vínculo<input required maxLength={100} value={newRegistration.cargoVinculo} onChange={event => setNewRegistration({ ...newRegistration, cargoVinculo: event.target.value })} /></label>
         </div>
         <label>Senha inicial<input required minLength={8} maxLength={64} type="password" autoComplete="new-password" value={newRegistration.senha} onChange={event => setNewRegistration({ ...newRegistration, senha: event.target.value })} /></label>
