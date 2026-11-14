@@ -150,7 +150,7 @@ describe('Public signup phone format', () => {
     expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body).telefone).toBe('+5548999991234')
   })
 
-  it('explains invalid phone format before making a request', async () => {
+  it('shows a field-specific invalid phone hint before making a request', async () => {
     render(<SignupPage onBack={vi.fn()} onCodeSent={vi.fn()} />)
     fireEvent.change(screen.getByLabelText(/Nome completo/), { target: { value: 'Ana Souza' } })
     fireEvent.change(screen.getByLabelText(/E-mail/), { target: { value: 'ana@example.org' } })
@@ -162,7 +162,7 @@ describe('Public signup phone format', () => {
     fireEvent.change(screen.getByLabelText(/Confirmar senha/), { target: { value: 'Senha123!' } })
     fireEvent.submit(screen.getByRole('button', { name: /Criar conta/ }).closest('form'))
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Informe DDI, DDD e número válidos.')
+    expect(await screen.findByText('Celular com 9 dígitos começando com 9.')).toBeTruthy()
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 })

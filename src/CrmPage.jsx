@@ -20,10 +20,12 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const [registrationCreateOpen, setRegistrationCreateOpen] = useState(false)
   const [registrationCreateBusy, setRegistrationCreateBusy] = useState(false)
   const [registrationCreateError, setRegistrationCreateError] = useState('')
+  const [registrationPhoneSubmitAttempted, setRegistrationPhoneSubmitAttempted] = useState(false)
   const [newRegistration, setNewRegistration] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '' })
   const [reservationEditTarget, setReservationEditTarget] = useState(null)
   const [reservationEditForm, setReservationEditForm] = useState(null)
   const [reservationEditError, setReservationEditError] = useState('')
+  const [reservationPhoneSubmitAttempted, setReservationPhoneSubmitAttempted] = useState(false)
   const [reservationEditBusy, setReservationEditBusy] = useState(false)
   const [reservationEditNow, setReservationEditNow] = useState(() => new Date())
   const [negotiationTarget, setNegotiationTarget] = useState(null)
@@ -309,6 +311,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   }
     function editReservation(item) {
       setReservationEditTarget(item)
+      setReservationPhoneSubmitAttempted(false)
       setReservationEditForm({
         tituloEvento: item.tituloEvento,
         descricaoFinalidade: item.descricaoFinalidade || '',
@@ -323,6 +326,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     }
     async function saveReservationEdit(event) {
       event.preventDefault()
+      setReservationPhoneSubmitAttempted(true)
       if (!reservationEditTarget || !reservationEditForm || reservationEditBusy) return
       const validation = getReservationStartError(reservationEditForm.dataReserva, reservationEditForm.horarioInicio)
       if (validation) {
@@ -330,7 +334,6 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
         return
       }
       if (hasPhoneInput(reservationEditForm.telefoneContato) && !isValidPhoneNumber(reservationEditForm.telefoneContato)) {
-        setReservationEditError('Informe DDI, DDD e número válidos para contato sobre a reserva.')
         return
       }
       setReservationEditBusy(true)
@@ -429,9 +432,9 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   }
   async function createRegistration(event) {
     event.preventDefault()
+    setRegistrationPhoneSubmitAttempted(true)
     if (registrationCreateBusy) return
     if (hasPhoneInput(newRegistration.telefone) && !isValidPhoneNumber(newRegistration.telefone)) {
-      setRegistrationCreateError('Informe DDI, DDD e número válidos.')
       return
     }
     setRegistrationCreateBusy(true)
@@ -460,6 +463,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       }, ...items])
       setClientUsers(items => [{ ...created, organizacao: newRegistration.organizacao.trim() }, ...items])
       setNewRegistration({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '' })
+      setRegistrationPhoneSubmitAttempted(false)
       setRegistrationCreateOpen(false)
       notify('Cadastro criado e registrado na auditoria.')
     } catch (error) {
@@ -493,9 +497,6 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     return normalized
   }
   async function saveClientProfile(client, form) {
-    if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) {
-      throw new Error('Informe DDI, DDD e número válidos.')
-    }
     const updated = await request(`/usuarios/${client.idUsuario}/cadastro`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -945,7 +946,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
           </div>
         </>}
         {section === 'Cadastros' && <>
-          <CrmTitle title="Cadastros e ficha do cliente" description="Consulte dados, histórico e ações de cada cadastro em uma ficha única." action={<Button icon={Plus} onClick={() => { setRegistrationCreateError(''); setRegistrationCreateOpen(true) }}>Novo cadastro</Button>} />
+          <CrmTitle title="Cadastros e ficha do cliente" description="Consulte dados, histórico e ações de cada cadastro em uma ficha única." action={<Button icon={Plus} onClick={() => { setRegistrationCreateError(''); setRegistrationPhoneSubmitAttempted(false); setRegistrationCreateOpen(true) }}>Novo cadastro</Button>} />
           <div className="crm-panel registration-panel">
             <div className="panel-heading registration-toolbar">
               <div className="segmented-control registration-filters">
@@ -1111,7 +1112,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
         <label>Descrição e finalidade<textarea required rows={3} value={reservationEditForm.descricaoFinalidade} onChange={event => setReservationEditForm({ ...reservationEditForm, descricaoFinalidade: event.target.value })} /></label>
         <section className="reservation-contact-card" aria-label="Contato desta reserva">
           <strong>Contato desta reserva</strong>
-          <label>Telefone para contato ou alteração<PhoneInput value={reservationEditForm.telefoneContato} onChange={telefoneContato => setReservationEditForm({ ...reservationEditForm, telefoneContato })} /><small>Celular informado pelo solicitante para assuntos desta reserva.</small></label>
+          <label>Telefone para contato ou alteração<PhoneInput value={reservationEditForm.telefoneContato} validationAttempted={reservationPhoneSubmitAttempted} onChange={telefoneContato => setReservationEditForm({ ...reservationEditForm, telefoneContato })} /><small>Celular informado pelo solicitante para assuntos desta reserva.</small></label>
         </section>
         <label>Espaço<select value={reservationEditForm.idEspaco} onChange={event => setReservationEditForm({ ...reservationEditForm, idEspaco: event.target.value })}>{spaces.map(space => <option key={space.idEspaco} value={space.idEspaco}>{space.nomeEspaco}</option>)}</select></label>
         <label>Data<input required type="date" min={reservationEditLocalTime.date} aria-invalid={Boolean(reservationEditValidation && reservationEditForm.dataReserva < reservationEditLocalTime.date)} value={reservationEditForm.dataReserva} onChange={event => { setReservationEditForm({ ...reservationEditForm, dataReserva: event.target.value }); setReservationEditError('') }} /></label>
@@ -1128,14 +1129,14 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       <Button icon={Check} disabled={!negotiationNote.trim() || negotiationBusy} onClick={recordNegotiationAndApprove}>{negotiationBusy ? 'Registrando...' : 'Registrar negociação e aprovar'}</Button>
     </Modal>
     <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onRole={saveRole} canManageRole={user.perfil === 1 && clientProfile?.idUsuario !== user.idUsuario} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
-    <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError('') } }} title="Criar cadastro para uma organização">
+    <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError(''); setRegistrationPhoneSubmitAttempted(false) } }} title="Criar cadastro para uma organização">
       <form className="form-stack" onSubmit={createRegistration}>
         <p className="access-intro">Cadastre a organização e uma pessoa responsável. A pessoa entrará usando e-mail e senha.</p>
         <label>Nome da organização<input required maxLength={100} value={newRegistration.organizacao} onChange={event => setNewRegistration({ ...newRegistration, organizacao: event.target.value })} /></label>
         <label>Nome e sobrenome do responsável<input required maxLength={100} value={newRegistration.nomeCompleto} onChange={event => setNewRegistration({ ...newRegistration, nomeCompleto: event.target.value })} /></label>
         <label>E-mail<input required type="email" maxLength={100} value={newRegistration.email} onChange={event => setNewRegistration({ ...newRegistration, email: event.target.value })} /></label>
         <div className="form-row">
-          <label>Telefone (opcional)<PhoneInput value={newRegistration.telefone} onChange={telefone => setNewRegistration({ ...newRegistration, telefone })} /></label>
+          <label>Telefone (opcional)<PhoneInput value={newRegistration.telefone} validationAttempted={registrationPhoneSubmitAttempted} onChange={telefone => setNewRegistration({ ...newRegistration, telefone })} /></label>
           <label>Cargo ou vínculo<input required maxLength={100} value={newRegistration.cargoVinculo} onChange={event => setNewRegistration({ ...newRegistration, cargoVinculo: event.target.value })} /></label>
         </div>
         <label>Senha inicial<input required minLength={8} maxLength={64} type="password" autoComplete="new-password" value={newRegistration.senha} onChange={event => setNewRegistration({ ...newRegistration, senha: event.target.value })} /></label>

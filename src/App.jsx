@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions, Dialog, DialogPanel, DialogTitle, Menu, MenuButton, MenuItem, MenuItems, Tab, TabGroup, TabList, TabPanel, TabPanels, Transition, TransitionChild } from '@headlessui/react'
 import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, DoorOpen, Download, Eye, EyeOff, ExternalLink, FileText, Filter, GraduationCap, Home as HomeIcon, LayoutDashboard, ListChecks, LockKeyhole, Mail, MapPin, Menu as MenuIcon, MessageCircle, Moon, MoreHorizontal, Plus, Search, ShieldCheck, Sun, Users, X } from 'lucide-react'
@@ -392,30 +392,57 @@ export function Logo({ variant = 'horizontalLight', className = '' }) {
 export function Button({ children, variant = 'primary', icon: Icon, className = '', ...props }) {
   return <button className={`button button-${variant} icon-text ${className}`} {...props}>{Icon && <Icon size={17} strokeWidth={1.8} />}{children}</button>
 }
-export function PhoneInput({ value, onChange, id, className = '', disabled = false, 'aria-invalid': ariaInvalid, 'aria-describedby': ariaDescribedBy }) {
+export function PhoneInput({ value, onChange, id, className = '', disabled = false, validationAttempted = false, 'aria-invalid': ariaInvalid, 'aria-describedby': ariaDescribedBy }) {
   const [parts, setParts] = useState(() => parsePhoneParts(value))
   const [invalidTextInput, setInvalidTextInput] = useState(false)
+  const [touched, setTouched] = useState({ areaCode: false, subscriber: false })
+  const [focused, setFocused] = useState(false)
+  const [editedAfterAttempt, setEditedAfterAttempt] = useState(false)
   const areaCodeInput = useRef(null)
   const numberInput = useRef(null)
+  const container = useRef(null)
+  const pendingNumberCaret = useRef(null)
+  const generatedId = useId()
+  const inputId = id || `phone-${generatedId}`
   const lastEmittedValue = useRef(value)
   useEffect(() => {
     if (value === lastEmittedValue.current) return
     lastEmittedValue.current = value
     setParts(parsePhoneParts(value))
-    setInvalidTextInput(Boolean(value && /[^0-9()+\s.-]/.test(String(value))))
+    setInvalidTextInput(false)
+    setTouched({ areaCode: false, subscriber: false })
   }, [value])
+  useEffect(() => setEditedAfterAttempt(false), [validationAttempted])
+  useLayoutEffect(() => {
+    const digitOffset = pendingNumberCaret.current
+    if (digitOffset === null) return
+    pendingNumberCaret.current = null
+    const input = numberInput.current
+    if (!input || document.activeElement !== input) return
+    const formatted = formatPhoneSubscriber(parts.subscriber)
+    let position = 0
+    let digitsBeforeCaret = 0
+    while (position < formatted.length && digitsBeforeCaret < digitOffset) {
+      if (/\d/.test(formatted[position])) digitsBeforeCaret += 1
+      position += 1
+    }
+    while (position < formatted.length && !/\d/.test(formatted[position])) position += 1
+    input.setSelectionRange(position, position)
+  }, [parts.subscriber])
   const hasValue = hasPhoneInput(phoneNumberFromParts(parts))
-  const subscriberLength = parts.subscriber.length
   const areaCodeLength = phoneCountryCodes.find(option => option.code === parts.countryCode)?.areaCodeLength || 2
-  const invalid = hasValue && (
-    !brazilianAreaCodes.has(parts.areaCode)
-    || subscriberLength !== 9
+  const invalidAreaCode = hasValue && (parts.areaCode.length !== areaCodeLength || !brazilianAreaCodes.has(parts.areaCode))
+  const invalidSubscriber = invalidTextInput || (hasValue && (
+    parts.subscriber.length !== 9
     || !parts.subscriber.startsWith('9')
     || !isValidPhoneNumber(phoneNumberFromParts(parts))
-  ) || invalidTextInput
-  useEffect(() => {
-    numberInput.current?.setCustomValidity(invalid ? 'Informe DDI, DDD e número válidos.' : '')
-  }, [invalid])
+  ))
+  const showAreaError = invalidAreaCode && (validationAttempted && !editedAfterAttempt || !focused && touched.areaCode)
+  const showSubscriberError = invalidSubscriber && (validationAttempted && !editedAfterAttempt || !focused && touched.subscriber)
+  const areaErrorId = `${inputId}-area-error`
+  const subscriberErrorId = `${inputId}-subscriber-error`
+  const areaDescribedBy = [ariaDescribedBy, showAreaError ? areaErrorId : null].filter(Boolean).join(' ') || undefined
+  const subscriberDescribedBy = [ariaDescribedBy, showSubscriberError ? subscriberErrorId : null].filter(Boolean).join(' ') || undefined
   const options = phoneCountryCodes.some(option => option.code === parts.countryCode)
     ? phoneCountryCodes
     : [{ code: parts.countryCode, country: 'Outro' }, ...phoneCountryCodes]
@@ -426,35 +453,51 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
     lastEmittedValue.current = nextValue
     onChange(nextValue)
   }
-  function updateSubscriber(value, pasted = false) {
-    const raw = value.trim()
-    if (raw && /[^0-9()+\s.-]/.test(raw)) {
-      setInvalidTextInput(true)
-      lastEmittedValue.current = raw
-      onChange(raw)
-      return
-    }
-    setInvalidTextInput(false)
+  function isCompletePhoneValue(raw, digits) {
+    return digits.length >= 10 && (
+      raw.startsWith('+')
+      || /^\s*\(/.test(raw)
+      || digits.length === 11
+      || (digits.startsWith('55') && digits.length > 11)
+    )
+  }
+  function updateSubscriber(event) {
+    const raw = event.currentTarget.value.trim()
     const digits = raw.replace(/\D/g, '')
-    const isCompleteNumber = raw.startsWith('+')
-      || /^\(\s*\d{1,3}\s*\)/.test(raw)
-      || digits.length > 10
-      || (pasted && parts.countryCode === '55' && !parts.areaCode && digits.length === 10)
-    if (isCompleteNumber) {
+    if (!event.nativeEvent.inputType && isCompletePhoneValue(raw, digits)) {
       update(parsePhoneParts(raw))
       return
     }
-    update({ ...parts, subscriber: digits.slice(0, 10) })
+    if (raw && /[^0-9()+\s.-]/.test(raw)) {
+      setInvalidTextInput(true)
+      return
+    }
+    setInvalidTextInput(false)
+    const input = numberInput.current
+    const caret = input?.selectionStart ?? raw.length
+    pendingNumberCaret.current = Math.min(raw.slice(0, caret).replace(/\D/g, '').length, 9)
+    update({ ...parts, subscriber: digits.slice(0, 9) })
   }
 
-  return <div className={`phone-input${className ? ` ${className}` : ''}`} role="group" aria-label="Telefone">
+  return <div ref={container} className={`phone-input${className ? ` ${className}` : ''}`} role="group" aria-label="Telefone">
     <select
-      id={id}
+      id={inputId}
       aria-label="Código do país (DDI)"
       autoComplete="tel-country-code"
       value={parts.countryCode}
       disabled={disabled}
       onChange={event => update({ ...parts, countryCode: event.currentTarget.value })}
+      onFocus={() => {
+        setFocused(true)
+        if (validationAttempted) setEditedAfterAttempt(true)
+      }}
+      onBlur={event => {
+        if (!container.current?.contains(event.relatedTarget)) {
+          setFocused(false)
+          setEditedAfterAttempt(false)
+          setTouched({ areaCode: true, subscriber: true })
+        }
+      }}
     >
       {options.map(option => <option key={option.code} value={option.code}>{option.country} (+{option.code})</option>)}
     </select>
@@ -468,8 +511,19 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       placeholder="DDD"
       value={parts.areaCode}
       disabled={disabled}
-      aria-invalid={Boolean(ariaInvalid) || invalid}
-      aria-describedby={ariaDescribedBy}
+      aria-invalid={Boolean(ariaInvalid) || showAreaError}
+      aria-describedby={areaDescribedBy}
+      onFocus={() => {
+        setFocused(true)
+        if (validationAttempted) setEditedAfterAttempt(true)
+      }}
+      onBlur={event => {
+        if (!container.current?.contains(event.relatedTarget)) {
+          setFocused(false)
+          setEditedAfterAttempt(false)
+          setTouched({ areaCode: true, subscriber: true })
+        }
+      }}
       onChange={event => {
         const areaCode = event.currentTarget.value.replace(/\D/g, '').slice(0, areaCodeLength)
         const shouldFocusNumber = !parts.subscriber
@@ -492,13 +546,24 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       type="tel"
       inputMode="numeric"
       autoComplete="tel-local"
-      maxLength={24}
+      maxLength={11}
       placeholder="Número"
       value={formatPhoneSubscriber(parts.subscriber)}
       disabled={disabled}
-      aria-invalid={Boolean(ariaInvalid) || invalid}
-      aria-describedby={ariaDescribedBy}
-      onChange={event => updateSubscriber(event.currentTarget.value)}
+      aria-invalid={Boolean(ariaInvalid) || showSubscriberError}
+      aria-describedby={subscriberDescribedBy}
+      onFocus={() => {
+        setFocused(true)
+        if (validationAttempted) setEditedAfterAttempt(true)
+      }}
+      onBlur={event => {
+        if (!container.current?.contains(event.relatedTarget)) {
+          setFocused(false)
+          setEditedAfterAttempt(false)
+          setTouched({ areaCode: true, subscriber: true })
+        }
+      }}
+      onChange={updateSubscriber}
       onKeyDown={event => {
         if (event.key !== 'Backspace' || parts.subscriber) return
         event.preventDefault()
@@ -509,11 +574,21 @@ export function PhoneInput({ value, onChange, id, className = '', disabled = fal
       onPaste={event => {
         const pasted = event.clipboardData.getData('text')
         if (!pasted) return
-        event.preventDefault()
-        updateSubscriber(pasted, true)
+        const digits = pasted.replace(/\D/g, '')
+        const isComplete = isCompletePhoneValue(pasted.trim(), digits)
+          || (!parts.areaCode && digits.length === 10)
+        if (isComplete) {
+          event.preventDefault()
+          update(parsePhoneParts(pasted))
+        } else if (digits.length > 9 || /[^0-9()+\s.-]/.test(pasted)) {
+          event.preventDefault()
+          update({ ...parts, subscriber: digits.slice(0, 9) })
+          setInvalidTextInput(Boolean(pasted && /[^0-9()+\s.-]/.test(pasted)))
+        }
       }}
     />
-    {invalid && <small className="phone-input-error" aria-live="polite">Informe DDI, DDD e número válidos.</small>}
+    {showAreaError && <small id={areaErrorId} className="phone-input-error" aria-live="polite">DDD com 2 dígitos válido.</small>}
+    {showSubscriberError && <small id={subscriberErrorId} className="phone-input-error" aria-live="polite">Celular com 9 dígitos começando com 9.</small>}
   </div>
 }
 export function PasswordInput({ toggleLabel = 'senha', ...props }) {
@@ -955,6 +1030,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
   const [form, setForm] = useState({ nomeCompleto: '', telefone: '', organizacao: '', cargoVinculo: '' })
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [profileLoadAttempt, setProfileLoadAttempt] = useState(0)
@@ -984,6 +1060,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
     setLoading(true)
     setError('')
     setSuccess('')
+    setPhoneSubmitAttempted(false)
     setProfile(null)
     request('/usuarios/me').then(data => {
       if (!active) return
@@ -1015,6 +1092,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
 
   async function saveProfile(event) {
     event.preventDefault()
+    setPhoneSubmitAttempted(true)
     if (invalidPhone || !profileChanged) return
     setSaving(true); setError(''); setSuccess('')
     try {
@@ -1116,7 +1194,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
       </section>
       <form className="profile-editor-form" onSubmit={saveProfile}>
         <label htmlFor="profile-name">Nome<input id="profile-name" required maxLength="100" value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
-        <label htmlFor="profile-phone">Telefone<PhoneInput id="profile-phone" value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} aria-invalid={invalidPhone} aria-describedby={invalidPhone ? 'profile-phone-error' : undefined} />{invalidPhone && <small id="profile-phone-error" className="profile-field-error">Informe DDI, DDD e número válidos.</small>}</label>
+        <label htmlFor="profile-phone">Telefone<PhoneInput id="profile-phone" value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} validationAttempted={phoneSubmitAttempted} /></label>
         <label htmlFor="profile-organization">Organização<input id="profile-organization" required maxLength="100" value={form.organizacao} readOnly={isStaff} onChange={event => setForm({ ...form, organizacao: event.target.value })} /></label>
         <label htmlFor="profile-role">Cargo ou vínculo<input id="profile-role" required maxLength="100" value={form.cargoVinculo} onChange={event => setForm({ ...form, cargoVinculo: event.target.value })} /></label>
         <div className="profile-readonly">
@@ -1277,6 +1355,7 @@ function Home({ spaces, spacesLoaded, onConsultSpace, onRequestReservation, onOp
 function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTime, initialEndTime, user }) {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
   const [form, setForm] = useState({ dataReserva: '', horarioInicio: '09:00', horarioFim: '10:00', tituloEvento: '', descricaoFinalidade: '', quantidadeParticipantes: '', telefoneContato: '' })
   const guidedTour = isGuidedTour(space?.tipoEspaco)
   useEffect(() => {
@@ -1286,11 +1365,12 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
     const draft = consumeBookingDraft(space.idEspaco)
     setForm({ ...defaults, ...(draft?.form || {}) })
     setMessage('')
+    setPhoneSubmitAttempted(false)
   }, [space, initialDate, initialTime, initialEndTime, guidedTour, user?.telefone])
   async function submit(event) {
     event.preventDefault()
+    setPhoneSubmitAttempted(true)
     if (hasPhoneInput(form.telefoneContato) && !isValidPhoneNumber(form.telefoneContato)) {
-      setMessage('Informe DDI, DDD e número válidos para contato sobre a reserva.')
       return
     }
     if (!user) {
@@ -1327,7 +1407,7 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
       {guidedTour && <p className="access-intro">A equipe confirma a visita, mas o intervalo fica reservado desde o primeiro pedido. Horários já solicitados não podem ser escolhidos novamente.</p>}
       <section className="reservation-contact-card" aria-label="Contato para esta reserva">
         <strong>Contato para esta reserva</strong>
-        <label>Telefone para contato ou alteração<PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm(current => ({ ...current, telefoneContato }))} /><small>Usaremos este número caso seja necessário falar sobre a solicitação.</small></label>
+        <label>Telefone para contato ou alteração<PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm(current => ({ ...current, telefoneContato }))} validationAttempted={phoneSubmitAttempted} /><small>Usaremos este número caso seja necessário falar sobre a solicitação.</small></label>
       </section>
       <label><span>{guidedTour ? 'Data preferida da visita' : 'Data do encontro'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="date" min={localDateValue()} value={form.dataReserva} onChange={e => setForm({ ...form, dataReserva: e.target.value })} /></label><div className="field-pair"><label><span>{guidedTour ? 'Horário preferido de início' : 'Início'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min="08:00" max="21:30" step="1800" value={form.horarioInicio} onChange={e => setForm({ ...form, horarioInicio: e.target.value })} /></label><label><span>{guidedTour ? 'Horário preferido de término' : 'Fim'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min={form.horarioInicio || '08:30'} max="22:00" step="1800" value={form.horarioFim} onChange={e => setForm({ ...form, horarioFim: e.target.value })} /></label></div>
       {guidedTour && <label>Quantidade de visitantes<input required type="number" min="1" max={space?.capacidadePessoas || 20} value={form.quantidadeParticipantes} onChange={e => setForm({ ...form, quantidadeParticipantes: e.target.value === '' ? '' : e.target.value })} /><small>Capacidade máxima: {space?.capacidadePessoas || 20} pessoas.</small></label>}
@@ -1477,6 +1557,7 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
   const [personaValue, setPersonaValue] = useState(client?.idPersona ? String(client.idPersona) : '')
   const [personaBusy, setPersonaBusy] = useState(false)
   const [personaFeedback, setPersonaFeedback] = useState('')
@@ -1509,6 +1590,7 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   const hours = monthlyQuotaUsed(reservations, client.idUsuario)
   const personaChanged = Boolean(personaValue) && Number(personaValue) !== Number(client.idPersona || 0)
   const profileChanged = Number(profileValue) !== Number(client.idPerfil)
+  const invalidPhone = hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)
   const fields = [
     ['E-mail', form.email || 'Não informado'],
     ['Telefone / WhatsApp', form.telefone || 'Não informado'],
@@ -1520,6 +1602,8 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   async function save(event) {
     event.preventDefault()
     if (busy) return
+    setPhoneSubmitAttempted(true)
+    if (invalidPhone) return
     setBusy(true)
     setError('')
     try {
@@ -1634,7 +1718,7 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
           {editing ? <div className="client-profile-grid client-profile-grid-edit">
             <label>Nome completo e sobrenome<input required maxLength={100} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
             <label>E-mail<input required type="email" maxLength={100} value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
-            <label>Telefone / WhatsApp<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} /></label>
+            <label>Telefone / WhatsApp<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} validationAttempted={phoneSubmitAttempted} /></label>
             <label>Organização<input required maxLength={100} value={form.organizacao} onChange={event => setForm({ ...form, organizacao: event.target.value })} /><small>A alteração vale só para seu cadastro. Organizações novas ficam pendentes de classificação.</small></label>
             <label>Vínculo / cargo<input required maxLength={100} value={form.cargoVinculo} onChange={event => setForm({ ...form, cargoVinculo: event.target.value })} /></label>
             <div className="client-profile-field"><span>Data de cadastro</span><strong>{fields[4][1]}</strong></div>
@@ -1643,8 +1727,8 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
           {error && <p className="form-message" role="alert">{error}</p>}
           <div className="client-profile-actions">
             {editing
-              ? <><button type="button" className="client-profile-action client-profile-action-muted" disabled={busy} onClick={() => { setEditing(false); setError(''); setForm({ nomeCompleto: client.nomeCompleto || '', email: client.email || '', telefone: client.telefone || '', organizacao: client.organizacao || '', cargoVinculo: client.cargoVinculo || '' }) }}>Cancelar edição</button><button type="submit" className="client-profile-action" disabled={busy}>{busy ? 'Salvando...' : 'Salvar alterações'}</button></>
-              : <><button type="button" className="client-profile-action" onClick={() => { setEditing(true); setError('') }}>Editar dados</button>{canResetPassword && <button type="button" className="client-profile-action" onClick={() => { setResetResult(''); setResetOpen(true); setResetError('') }}>Redefinir senha</button>}</>}
+              ? <><button type="button" className="client-profile-action client-profile-action-muted" disabled={busy} onClick={() => { setEditing(false); setError(''); setPhoneSubmitAttempted(false); setForm({ nomeCompleto: client.nomeCompleto || '', email: client.email || '', telefone: client.telefone || '', organizacao: client.organizacao || '', cargoVinculo: client.cargoVinculo || '' }) }}>Cancelar edição</button><button type="submit" className="client-profile-action" disabled={busy}>{busy ? 'Salvando...' : 'Salvar alterações'}</button></>
+              : <><button type="button" className="client-profile-action" onClick={() => { setEditing(true); setError(''); setPhoneSubmitAttempted(false) }}>Editar dados</button>{canResetPassword && <button type="button" className="client-profile-action" onClick={() => { setResetResult(''); setResetOpen(true); setResetError('') }}>Redefinir senha</button>}</>}
           </div>
         </form>
         {canDeactivate && client.ativo !== false && <section className="client-profile-deactivation">

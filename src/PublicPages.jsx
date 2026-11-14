@@ -43,14 +43,16 @@ export function AccessPage({ onLogin, onSignup }) {
 export function SignupPage({ onBack, onCodeSent }) {
   const [form, setForm] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '', confirmarSenha: '' })
   const [status, setStatus] = useState('')
+  const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
   const [sendFailedEmail, setSendFailedEmail] = useState('')
   const [resending, setResending] = useState(false)
   async function submit(event) {
     event.preventDefault()
     setStatus('')
+    setPhoneSubmitAttempted(true)
     if (form.nomeCompleto.trim().split(/\s+/).length < 2) return setStatus('Informe nome e sobrenome.')
     if (form.senha !== form.confirmarSenha) return setStatus('As senhas não coincidem.')
-    if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) return setStatus('Informe DDI, DDD e número válidos.')
+    if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) return
     try {
       const { confirmarSenha, ...cadastro } = form
       await request('/usuarios/cadastro-publico', { method: 'POST', body: JSON.stringify({ ...cadastro, telefone: normalizePhoneToE164(form.telefone) }) })
@@ -83,7 +85,7 @@ export function SignupPage({ onBack, onCodeSent }) {
       <form className="form-stack account-form" onSubmit={submit}>
         <label>Nome completo e sobrenome <span aria-hidden="true">*</span><input required autoComplete="name" value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: e.target.value })} /></label>
         <label>E-mail <span aria-hidden="true">*</span><input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
-        <label>Telefone<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} /></label>
+        <label>Telefone<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} validationAttempted={phoneSubmitAttempted} /></label>
         <label>Organização <span aria-hidden="true">*</span><input required value={form.organizacao} onChange={e => setForm({ ...form, organizacao: e.target.value })} /></label>
         <label>Cargo ou vínculo <span aria-hidden="true">*</span><input required value={form.cargoVinculo} onChange={e => setForm({ ...form, cargoVinculo: e.target.value })} /></label>
         <label>Senha <span aria-hidden="true">*</span><PasswordInput required minLength={8} maxLength={64} autoComplete="new-password" value={form.senha} onChange={e => setForm({ ...form, senha: e.target.value })} /></label>
@@ -357,6 +359,26 @@ export function HelpPage() {
   const [file, setFile] = useState(null)
   const [status, setStatus] = useState('')
   const [progress, setProgress] = useState(0)
-  async function submit(event) { event.preventDefault(); setStatus(''); if (hasPhoneInput(form.telefoneContato) && !isValidPhoneNumber(form.telefoneContato)) return setStatus('Informe DDI, DDD e número válidos.'); if (file && (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024)) return setStatus('Anexe PDF, PNG ou JPG de até 10 MB.'); const payload = { ...form, telefoneContato: normalizePhoneToE164(form.telefoneContato) }; try { if (file) await uploadQuestion(payload, file, setProgress); else await request('/duvidas', { method: 'POST', body: JSON.stringify(payload) }); setProgress(100); setStatus('Mensagem enviada. A equipe InPETU responderá pelo e-mail informado.'); setForm({ emailContato: '', telefoneContato: '', mensagemDuvida: '' }); setFile(null) } catch (error) { setStatus(error.message); setProgress(0) } }
-  return <main className="inner-page help-page"><div className="help-intro"><Title as="h1">Vamos conversar<br /><em>sobre sua ideia?</em></Title><p>Tem dúvidas sobre os espaços, eventos ou quer descobrir como fazer parte do ecossistema? Escreva para a gente.</p><div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div><div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div></div><form className="help-form" onSubmit={submit}><div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>Retornamos em até dois dias úteis.</small></div></div><label>Seu e-mail<input required type="email" value={form.emailContato} onChange={e => setForm({ ...form, emailContato: e.target.value })} /></label><label>Telefone <span>(opcional)</span><PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm({ ...form, telefoneContato })} /></label><label>Sua mensagem<textarea required rows="5" maxLength="5000" value={form.mensagemDuvida} onChange={e => setForm({ ...form, mensagemDuvida: e.target.value })} placeholder="Como podemos ajudar?" /></label><label className="upload-box"><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><span className="upload-icon"><Plus size={19} /></span><span><strong>{file ? file.name : 'Adicionar anexo'}</strong><small>PDF, PNG ou JPG · até 10 MB</small></span><span className="upload-action">Escolher arquivo</span></label>{progress > 0 && <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>}{status && <p className={status.startsWith('Mensagem') ? 'success-note' : 'form-message'}>{status}</p>}<Button type="submit">Enviar mensagem <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Seus dados são protegidos pela política de privacidade UFSC.</p></form></main>
+  const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    setStatus('')
+    setPhoneSubmitAttempted(true)
+    if (hasPhoneInput(form.telefoneContato) && !isValidPhoneNumber(form.telefoneContato)) return
+    if (file && (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024)) return setStatus('Anexe PDF, PNG ou JPG de até 10 MB.')
+    const payload = { ...form, telefoneContato: normalizePhoneToE164(form.telefoneContato) }
+    try {
+      if (file) await uploadQuestion(payload, file, setProgress)
+      else await request('/duvidas', { method: 'POST', body: JSON.stringify(payload) })
+      setProgress(100)
+      setStatus('Mensagem enviada. A equipe InPETU responderá pelo e-mail informado.')
+      setForm({ emailContato: '', telefoneContato: '', mensagemDuvida: '' })
+      setFile(null)
+      setPhoneSubmitAttempted(false)
+    } catch (error) {
+      setStatus(error.message)
+      setProgress(0)
+    }
+  }
+  return <main className="inner-page help-page"><div className="help-intro"><Title as="h1">Vamos conversar<br /><em>sobre sua ideia?</em></Title><p>Tem dúvidas sobre os espaços, eventos ou quer descobrir como fazer parte do ecossistema? Escreva para a gente.</p><div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div><div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div></div><form className="help-form" onSubmit={submit}><div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>Retornamos em até dois dias úteis.</small></div></div><label>Seu e-mail<input required type="email" value={form.emailContato} onChange={e => setForm({ ...form, emailContato: e.target.value })} /></label><label>Telefone <span>(opcional)</span><PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm({ ...form, telefoneContato })} validationAttempted={phoneSubmitAttempted} /></label><label>Sua mensagem<textarea required rows="5" maxLength="5000" value={form.mensagemDuvida} onChange={e => setForm({ ...form, mensagemDuvida: e.target.value })} placeholder="Como podemos ajudar?" /></label><label className="upload-box"><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><span className="upload-icon"><Plus size={19} /></span><span><strong>{file ? file.name : 'Adicionar anexo'}</strong><small>PDF, PNG ou JPG · até 10 MB</small></span><span className="upload-action">Escolher arquivo</span></label>{progress > 0 && <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>}{status && <p className={status.startsWith('Mensagem') ? 'success-note' : 'form-message'}>{status}</p>}<Button type="submit">Enviar mensagem <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Seus dados são protegidos pela política de privacidade UFSC.</p></form></main>
 }
