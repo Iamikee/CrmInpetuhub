@@ -2474,6 +2474,11 @@ body[data-crm-theme="dark"] .dialog-panel {
   min-width: 0;
 }
 
+:root[data-theme] .phone-input > input[aria-invalid="true"],
+:root[data-theme] .phone-input > select[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
 .phone-input > .phone-input-error {
   grid-column: 1 / -1;
   color: var(--color-danger, #a32626);

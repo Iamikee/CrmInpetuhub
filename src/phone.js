@@ -45,7 +45,7 @@ export function parsePhoneParts(value) {
   return {
     countryCode,
     areaCode: nationalNumber.slice(0, areaCodeLength),
-    subscriber: nationalNumber.slice(areaCodeLength, areaCodeLength + 10),
+    subscriber: nationalNumber.slice(areaCodeLength, areaCodeLength + 9),
   }
 }
 
@@ -101,5 +101,5 @@ export function phoneNumberFromParts({ countryCode, areaCode, subscriber }) {
 }
 
 export function formatPhoneSubscriber(value) {
-  return formatSubscriber(onlyDigits(value).slice(0, 10))
+  return formatSubscriber(onlyDigits(value).slice(0, 9))
 }
