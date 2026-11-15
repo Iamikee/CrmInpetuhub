@@ -6,8 +6,10 @@ import com.inpetu.connect.model.LogAuditoria;
 import com.inpetu.connect.model.Usuario;
 import com.inpetu.connect.dto.EspacoStatusRequest;
 import com.inpetu.connect.dto.EspacoCriacaoRequest;
+import com.inpetu.connect.dto.HorarioFuncionamentoResponse;
 import com.inpetu.connect.repository.*;
 import com.inpetu.connect.service.ImageUploadService;
+import com.inpetu.connect.service.HorarioFuncionamentoService;
 import com.inpetu.connect.service.ImageUploadService.StoredImage;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,6 +34,7 @@ public class EspacoController {
     private final EspacoFotoRepository fotos;
     private final LogAuditoriaRepository auditoria;
     private final UsuarioRepository usuarios;
+    private final HorarioFuncionamentoService horarios;
     private final Path imageDirectory;
     public EspacoController(
         EspacoRepository espacos,
@@ -39,6 +42,7 @@ public class EspacoController {
         EspacoFotoRepository fotos,
         LogAuditoriaRepository auditoria,
         UsuarioRepository usuarios,
+        HorarioFuncionamentoService horarios,
         @Value("${app.upload.dir:uploads/inpetu}") String uploadDirectory
     ) {
         this.espacos = espacos;
@@ -46,9 +50,19 @@ public class EspacoController {
         this.fotos = fotos;
         this.auditoria = auditoria;
         this.usuarios = usuarios;
+        this.horarios = horarios;
         this.imageDirectory = Path.of(uploadDirectory).toAbsolutePath().normalize().resolve("espacos");
     }
     @GetMapping public List<Espaco> listar() { return espacos.findAllByOrderByNomeEspaco(); }
+    @GetMapping("/horarios-funcionamento")
+    public List<HorarioFuncionamentoResponse> horarioGeral() {
+        return horarios.listar(false);
+    }
+    @GetMapping("/{id}/horarios-funcionamento")
+    public List<HorarioFuncionamentoResponse> horarioDoEspaco(@PathVariable Integer id) {
+        Espaco espaco = buscar(id);
+        return horarios.listar("visita guiada".equalsIgnoreCase(espaco.getTipoEspaco()));
+    }
     @GetMapping("/{id}/imagem")
     public ResponseEntity<Resource> obterImagem(@PathVariable Integer id) {
         Espaco espaco = buscar(id);

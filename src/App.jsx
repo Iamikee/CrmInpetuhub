@@ -8,6 +8,7 @@ import { brazilianAreaCodes, formatPhoneNumber, formatPhoneSubscriber, hasPhoneI
 import { BRAND_LOGOS } from './brand.js'
 import { CountUp, Reveal, useScrollProgress } from './motion/index.js'
 import ErrorBoundary from './ErrorBoundary.jsx'
+import { formatWeeklyHours, getApprovalMessage, getHoursForDate, getIsoDayOfWeek, getLatestStartTime, validateOperatingHours } from './openingHours.js'
 
 const CalendarPage = lazy(() => import('./CalendarPage.jsx'))
 const Crm = lazy(() => import('./CrmPage.jsx'))
@@ -1289,11 +1290,20 @@ export function RoomGallery({ space, onClose, onConsultSpace, onRequestReservati
 }
 function Home({ spaces, spacesLoaded, onConsultSpace, onRequestReservation, onOpenCalendar, user, optionalGallery: OptionalGallery, openOptionalFeature, openOptionalFeatureLogin }) {
   const [filter, setFilter] = useState('Todos os espaços')
+  const [weeklyHours, setWeeklyHours] = useState([])
+  const [weeklyHoursError, setWeeklyHoursError] = useState('')
   const filtered = filter === 'Todos os espaços' ? spaces : spaces.filter(space => space.tipoEspaco === filter)
   const types = ['Todos os espaços', ...new Set(spaces.map(space => space.tipoEspaco))]
   const activeSpaces = spaces.filter(space => space.ativo !== false)
   const [gallerySpace, setGallerySpace] = useState(null)
   const heroSpace = activeSpaces[0]
+  useEffect(() => {
+    let active = true
+    request('/espacos/horarios-funcionamento')
+      .then(data => { if (active) setWeeklyHours(data) })
+      .catch(error => { if (active) setWeeklyHoursError(error.message) })
+    return () => { active = false }
+  }, [])
   return <>
     <Reveal as="section" className="hero-shell reference-hero">
       <div className="reference-hero-copy">
@@ -1302,7 +1312,7 @@ function Home({ spaces, spacesLoaded, onConsultSpace, onRequestReservation, onOp
         <p className="reference-description">Encontre o ambiente certo para se reunir, aprender e fazer acontecer no InPETU Hub.</p>
         <Button icon={CalendarDays} onClick={onOpenCalendar}>Consultar horários</Button>
         <dl className="reference-stats">
-          <div><dt><CountUp value={22} from={8} format={value => `08h-${Math.round(value)}h`} /></dt><dd>Horário de funcionamento</dd></div>
+          <div><dt>{formatWeeklyHours(weeklyHours) || (weeklyHoursError ? 'Indisponível' : 'Consultando...')}</dt><dd>Horário de funcionamento semanal</dd></div>
           <div><dt>{spacesLoaded ? <CountUp value={spaces.filter(space => space.ativo !== false).length} /> : '...'}</dt><dd>Ambientes ativos</dd></div>
           <div><dt>UFSC</dt><dd>Inovação em Florianópolis</dd></div>
         </dl>
@@ -1356,8 +1366,26 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
+  const [operatingHours, setOperatingHours] = useState([])
+  const [operatingHoursLoading, setOperatingHoursLoading] = useState(false)
+  const [operatingHoursError, setOperatingHoursError] = useState('')
+  const [scheduleAttempted, setScheduleAttempted] = useState(false)
+  const [scheduleTouched, setScheduleTouched] = useState({})
   const [form, setForm] = useState({ dataReserva: '', horarioInicio: '09:00', horarioFim: '10:00', tituloEvento: '', descricaoFinalidade: '', quantidadeParticipantes: '', telefoneContato: '' })
   const guidedTour = isGuidedTour(space?.tipoEspaco)
+  const selectedDayHours = getHoursForDate(operatingHours, form.dataReserva)
+  const scheduleValidation = validateOperatingHours(operatingHours, form.dataReserva, form.horarioInicio, form.horarioFim)
+  const selectedDayApproval = getApprovalMessage(operatingHours, form.dataReserva)
+  const operatingOpeningTime = selectedDayHours?.abertura?.slice(0, 5)
+  const localNow = getSaoPauloDateTime()
+  const earliestStartTime = form.dataReserva === localNow.date && localNow.time > operatingOpeningTime
+    ? localNow.time
+    : operatingOpeningTime
+  const visibleScheduleValidation = scheduleAttempted || scheduleTouched.dataReserva || scheduleTouched.horarioInicio || scheduleTouched.horarioFim
+    ? scheduleValidation
+    : ''
+  const timeFieldsDisabled = operatingHoursLoading || Boolean(operatingHoursError) || !selectedDayHours || selectedDayHours.fechado
+  const latestStartTime = getLatestStartTime(operatingHours, form.dataReserva)
   useEffect(() => {
     if (!space) return
     const horarioInicio = guidedTour ? initialTime || '' : initialTime || '09:00'
@@ -1366,10 +1394,40 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
     setForm({ ...defaults, ...(draft?.form || {}) })
     setMessage('')
     setPhoneSubmitAttempted(false)
+    setScheduleAttempted(false)
+    setScheduleTouched({})
   }, [space, initialDate, initialTime, initialEndTime, guidedTour, user?.telefone])
+  useEffect(() => {
+    if (!space) {
+      setOperatingHours([])
+      setOperatingHoursLoading(false)
+      setOperatingHoursError('')
+      return
+    }
+    let active = true
+    setOperatingHours([])
+    setOperatingHoursLoading(true)
+    setOperatingHoursError('')
+    request(`/espacos/${space.idEspaco}/horarios-funcionamento`)
+      .then(data => { if (active) setOperatingHours(data) })
+      .catch(error => { if (active) setOperatingHoursError(error.message) })
+      .finally(() => { if (active) setOperatingHoursLoading(false) })
+    return () => { active = false }
+  }, [space?.idEspaco])
   async function submit(event) {
     event.preventDefault()
     setPhoneSubmitAttempted(true)
+    setScheduleAttempted(true)
+    if (operatingHoursLoading || operatingHoursError || !operatingHours.length) {
+      setMessage(operatingHoursError
+        ? 'Não foi possível consultar o funcionamento. Tente novamente.'
+        : 'Aguarde a validação do horário de funcionamento.')
+      return
+    }
+    if (scheduleValidation) {
+      setMessage('')
+      return
+    }
     if (hasPhoneInput(form.telefoneContato) && !isValidPhoneNumber(form.telefoneContato)) {
       return
     }
@@ -1409,7 +1467,9 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
         <strong>Contato para esta reserva</strong>
         <label>Telefone para contato ou alteração<PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm(current => ({ ...current, telefoneContato }))} validationAttempted={phoneSubmitAttempted} /><small>Usaremos este número caso seja necessário falar sobre a solicitação.</small></label>
       </section>
-      <label><span>{guidedTour ? 'Data preferida da visita' : 'Data do encontro'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="date" min={localDateValue()} value={form.dataReserva} onChange={e => setForm({ ...form, dataReserva: e.target.value })} /></label><div className="field-pair"><label><span>{guidedTour ? 'Horário preferido de início' : 'Início'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min="08:00" max="21:30" step="1800" value={form.horarioInicio} onChange={e => setForm({ ...form, horarioInicio: e.target.value })} /></label><label><span>{guidedTour ? 'Horário preferido de término' : 'Fim'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min={form.horarioInicio || '08:30'} max="22:00" step="1800" value={form.horarioFim} onChange={e => setForm({ ...form, horarioFim: e.target.value })} /></label></div>
+      <label><span>{guidedTour ? 'Data preferida da visita' : 'Data do encontro'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="date" min={localNow.date} value={form.dataReserva} aria-invalid={Boolean(visibleScheduleValidation)} aria-describedby={visibleScheduleValidation ? 'booking-hours-error' : undefined} onChange={e => setForm({ ...form, dataReserva: e.target.value })} onBlur={() => setScheduleTouched(current => ({ ...current, dataReserva: true }))} /></label><div className="field-pair"><label><span>{guidedTour ? 'Horário preferido de início' : 'Início'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min={earliestStartTime} max={latestStartTime} step="1800" disabled={timeFieldsDisabled} value={form.horarioInicio} aria-invalid={Boolean(visibleScheduleValidation)} aria-describedby={visibleScheduleValidation ? 'booking-hours-error' : undefined} onChange={e => setForm({ ...form, horarioInicio: e.target.value })} onBlur={() => setScheduleTouched(current => ({ ...current, horarioInicio: true }))} /></label><label><span>{guidedTour ? 'Horário preferido de término' : 'Fim'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min={form.horarioInicio ? addMinutesToTime(form.horarioInicio, 30) : operatingOpeningTime} max={selectedDayHours?.fechamento?.slice(0, 5)} step="1800" disabled={timeFieldsDisabled} value={form.horarioFim} aria-invalid={Boolean(visibleScheduleValidation)} aria-describedby={visibleScheduleValidation ? 'booking-hours-error' : undefined} onChange={e => setForm({ ...form, horarioFim: e.target.value })} onBlur={() => setScheduleTouched(current => ({ ...current, horarioFim: true }))} /></label></div>
+      {selectedDayApproval && <p className="booking-guided-note" role="note">{selectedDayApproval}</p>}
+      {visibleScheduleValidation && <p id="booking-hours-error" className="booking-validation-error" role="alert">{visibleScheduleValidation}</p>}
       {guidedTour && <label>Quantidade de visitantes<input required type="number" min="1" max={space?.capacidadePessoas || 20} value={form.quantidadeParticipantes} onChange={e => setForm({ ...form, quantidadeParticipantes: e.target.value === '' ? '' : e.target.value })} /><small>Capacidade máxima: {space?.capacidadePessoas || 20} pessoas.</small></label>}
       <label><span>{guidedTour ? 'Nome do grupo ou da instituição' : 'Nome do encontro'} <span className="required-indicator" aria-hidden="true">*</span></span><input required maxLength="150" placeholder={guidedTour ? 'Ex.: Turma de Engenharia da UFSC' : 'Ex.: Oficina de prototipagem'} value={form.tituloEvento} onChange={e => setForm({ ...form, tituloEvento: e.target.value })} /></label><label><span>{guidedTour ? 'Objetivo ou observações da visita' : 'O que você está planejando?'} <span className="required-indicator" aria-hidden="true">*</span></span><textarea required rows="3" placeholder={guidedTour ? 'Conte brevemente o perfil do grupo e o que gostaria de conhecer' : 'Conte um pouco sobre o encontro'} value={form.descricaoFinalidade} onChange={e => setForm({ ...form, descricaoFinalidade: e.target.value })} /></label>
       {message && <p className="form-message" role="alert">{message}</p>}<Button type="submit" icon={ArrowRight} disabled={busy}>{busy ? 'Enviando...' : guidedTour ? 'Enviar pedido de visita' : 'Continuar solicitação'}</Button><p className="form-footnote icon-text"><ShieldCheck size={14} /> Seus dados são tratados de acordo com a LGPD.</p>
@@ -2029,7 +2089,9 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
     const saved = { ...reserva, espaco: bookingSpace?.nomeEspaco, solicitante: user?.nome || 'Você' }
     setReservations(items => [saved, ...items]); setMyReservations(items => [saved, ...items])
     setAvailabilityVersion(version => version + 1)
-    setBookingConfirmation('Solicitação enviada. Acompanhe o andamento em Minhas reservas.')
+    setBookingConfirmation(reserva.statusReserva === 'Pendente' && getIsoDayOfWeek(reserva.dataReserva) === 7
+      ? 'Status Pendente. Solicitações para domingo dependem de aprovação da equipe. Acompanhe em Minhas reservas.'
+      : 'Solicitação enviada. Acompanhe o andamento em Minhas reservas.')
     setView('reservations')
     window.scrollTo(0, 0)
   }

@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -23,6 +24,7 @@ public class ReservaService {
     private static final ZoneId ZONA_INPETU = ZoneId.of("America/Sao_Paulo");
     private final ReservaRepository reservas;
     private final EspacoRepository espacos;
+    private final HorarioFuncionamentoService horarios;
     private final UsuarioRepository usuarios;
     private final CancelamentoReservaRepository cancelamentos;
     private final LogAuditoriaRepository auditoria;
@@ -30,9 +32,10 @@ public class ReservaService {
 
     public ReservaService(ReservaRepository reservas, EspacoRepository espacos, UsuarioRepository usuarios,
             CancelamentoReservaRepository cancelamentos, LogAuditoriaRepository auditoria,
-            NotificacaoService notificacoes) {
+            NotificacaoService notificacoes, HorarioFuncionamentoService horarios) {
         this.reservas = reservas;
         this.espacos = espacos;
+        this.horarios = horarios;
         this.usuarios = usuarios;
         this.cancelamentos = cancelamentos;
         this.auditoria = auditoria;
@@ -47,6 +50,8 @@ public class ReservaService {
         Espaco espaco = espacos.bloquearParaReserva(request.idEspaco())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Espaço não encontrado."));
         boolean visitaGuiada = "Visita guiada".equalsIgnoreCase(espaco.getTipoEspaco());
+        boolean exigeAprovacaoHorario = horarios.validarReserva(
+                espaco, request.dataReserva(), request.horarioInicio(), request.horarioFim());
         if (visitaGuiada) {
             if (request.quantidadeParticipantes() == null)
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe a quantidade de visitantes.");
@@ -54,10 +59,6 @@ public class ReservaService {
                     && request.quantidadeParticipantes() > espaco.getCapacidadePessoas())
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "A quantidade de visitantes excede a capacidade da visita.");
-            if (request.horarioInicio().isBefore(LocalTime.of(8, 0)) ||
-                    request.horarioFim().isAfter(LocalTime.of(22, 0)))
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "A visita deve acontecer entre 08:00 e 22:00.");
         }
         if (!Boolean.TRUE.equals(espaco.getAtivo())) {
             String motivo = espaco.getMotivoIndisponibilidade();
@@ -88,7 +89,8 @@ public class ReservaService {
         Double limiteMensal = limiteMensal(solicitante.getIdPersona());
         boolean excedeCota = limiteMensal != null
                 && horasReservadas(solicitante.getIdUsuario(), request.dataReserva(), null) + horasPedido > limiteMensal;
-        boolean exigeAprovacao = visitaGuiada || Boolean.TRUE.equals(espaco.getExigeAprovacaoManual())
+        boolean domingo = request.dataReserva().getDayOfWeek() == DayOfWeek.SUNDAY;
+        boolean exigeAprovacao = domingo || exigeAprovacaoHorario || visitaGuiada || Boolean.TRUE.equals(espaco.getExigeAprovacaoManual())
                 || solicitante.getIdPersona() == null || solicitante.getIdPersona() == 6 || excedeCota;
         reserva.setStatusReserva(exigeAprovacao ? "Pendente" : "Confirmada");
         reserva.setExcedeCota(excedeCota);
@@ -122,6 +124,8 @@ public class ReservaService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Espaço não encontrado."));
         if (!Boolean.TRUE.equals(espaco.getAtivo()))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Este espaço está indisponível.");
+        boolean exigeAprovacaoHorario = horarios.validarReserva(
+                espaco, request.dataReserva(), request.horarioInicio(), request.horarioFim());
         validarVisita(espaco, request.quantidadeParticipantes(), request.horarioInicio(), request.horarioFim());
         if (reservas.existeConflitoParaAtualizacao(espaco.getIdEspaco(), id, request.dataReserva(),
                 request.horarioInicio(), request.horarioFim()))
@@ -145,7 +149,8 @@ public class ReservaService {
         reserva.setQuantidadeParticipantes(request.quantidadeParticipantes());
         reserva.setTelefoneContato(TelefoneUtils.normalizarE164(request.telefoneContato()));
         reserva.setExcedeCota(excedeCota);
-        if (excedeCota) {
+        boolean domingo = request.dataReserva().getDayOfWeek() == DayOfWeek.SUNDAY;
+        if (domingo || excedeCota || exigeAprovacaoHorario) {
             reserva.setStatusReserva("Pendente");
             reserva.setIdUsuarioAprovador(null);
             reserva.setDataAprovacao(null);
@@ -276,8 +281,6 @@ public class ReservaService {
         if (espaco.getCapacidadePessoas() != null && participantes > espaco.getCapacidadePessoas())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "A quantidade de visitantes excede a capacidade da visita.");
-        if (inicio.isBefore(LocalTime.of(8, 0)) || fim.isAfter(LocalTime.of(22, 0)))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A visita deve acontecer entre 08:00 e 22:00.");
     }
 
     private Double limiteMensal(Integer persona) {

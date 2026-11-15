@@ -20,6 +20,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.DayOfWeek;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
 
@@ -125,17 +127,19 @@ public class DemoDataSeed {
                 var espaco = espacos.findByNomeEspacoIgnoreCase(dados.tipoEspaco()).orElseThrow(() ->
                     new IllegalStateException("Espaço seed não encontrado: " + dados.tipoEspaco()));
                 Reserva reserva = new Reserva();
+                LocalDate dataReserva = LocalDate.now(ZoneId.of("America/Sao_Paulo")).plusDays(dados.dias());
+                String statusReserva = dataReserva.getDayOfWeek() == DayOfWeek.SUNDAY ? "Pendente" : dados.status();
                 reserva.setTituloEvento(dados.titulo());
                 reserva.setDescricaoFinalidade(dados.descricao());
-                reserva.setDataReserva(LocalDate.now().plusDays(dados.dias()));
+                reserva.setDataReserva(dataReserva);
                 reserva.setHorarioInicio(LocalTime.parse(dados.inicio()));
                 reserva.setHorarioFim(LocalTime.parse(dados.fim()));
                 reserva.setQuantidadeParticipantes(dados.participantes());
-                reserva.setStatusReserva(dados.status());
+                reserva.setStatusReserva(statusReserva);
                 reserva.setIdEspaco(espaco.getIdEspaco());
                 reserva.setIdSolicitante(solicitante.getIdUsuario());
                 reserva.setDataSolicitacao(LocalDateTime.now().minusDays(10 - i));
-                if ("Confirmada".equals(dados.status())) {
+                if ("Confirmada".equals(statusReserva)) {
                     reserva.setIdUsuarioAprovador(coordenacao.getIdUsuario());
                     reserva.setDataAprovacao(reserva.getDataSolicitacao());
                 }

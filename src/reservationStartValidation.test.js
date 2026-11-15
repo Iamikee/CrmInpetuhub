@@ -22,10 +22,10 @@ describe('reservation start validation in America/Sao_Paulo', () => {
     const stylesheet = readFileSync('src/reference.css', 'utf8')
 
     expect(source).toMatch(/type="date" min=\{reservationEditLocalTime\.date\}/)
-    expect(source).toMatch(/type="time" min=\{reservationEditForm\.dataReserva === reservationEditLocalTime\.date \? reservationEditLocalTime\.time : undefined\}/)
+    expect(source).toMatch(/type="time" min=\{reservationEditEarliestStart\} max=\{reservationEditLatestStart\}/)
     expect(source).toMatch(/disabled=\{reservationEditBusy \|\| Boolean\(reservationEditValidation\)\}/)
     expect(source).toContain('setReservationEditError(error.message)')
-    expect(source).toContain('{(reservationEditValidation || reservationEditError) && <p className="form-message" role="alert">{reservationEditValidation || reservationEditError}</p>}')
+    expect(source).toContain('{(reservationEditValidation || reservationEditError) && <p id="reservation-edit-hours-error" className="form-message" role="alert">{reservationEditValidation || reservationEditError}</p>}')
     expect(stylesheet).toMatch(/\.reservation-edit-form > label,[\s\S]*?gap:\s*8px;/)
     expect(stylesheet).toMatch(/\.reservation-edit-time-row\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);[\s\S]*?gap:\s*16px;/)
   })
