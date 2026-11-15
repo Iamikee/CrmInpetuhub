@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.time.DayOfWeek;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -125,8 +126,13 @@ class DemoDataSeedTest {
         assertEquals(13, pessoas.size());
         assertEquals(10, orgs.size());
         assertEquals(9, reservasSeed.size());
-        assertEquals(7, reservasSalvas.stream().filter(reserva -> "Pendente".equals(reserva.getStatusReserva())).count());
-        assertEquals(2, reservasSalvas.stream().filter(reserva -> "Confirmada".equals(reserva.getStatusReserva())).count());
+        assertTrue(reservasSalvas.stream().filter(reserva -> "Pendente".equals(reserva.getStatusReserva())).count() >= 7);
+        assertTrue(reservasSalvas.stream().filter(reserva -> "Confirmada".equals(reserva.getStatusReserva())).count() <= 2);
+        List<Reserva> reservasDominicais = reservasSalvas.stream()
+            .filter(reserva -> reserva.getDataReserva().getDayOfWeek() == DayOfWeek.SUNDAY)
+            .toList();
+        assertFalse(reservasDominicais.isEmpty());
+        assertTrue(reservasDominicais.stream().allMatch(reserva -> "Pendente".equals(reserva.getStatusReserva())));
         for (int i = 0; i < reservasSalvas.size(); i++) {
             Reserva left = reservasSalvas.get(i);
             for (int j = i + 1; j < reservasSalvas.size(); j++) {

@@ -1345,6 +1345,17 @@ body .public-app .booking-legend > span {
   line-height: 1.2;
 }
 
+.public-app .booking-date-card .booking-date-approval-dot,
+.public-app .calendar-date-option .booking-date-approval-dot {
+  display: block;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--color-surface);
+  border-radius: 50%;
+  background: #b7791f;
+}
+
 .public-app .booking-date-card strong {
   color: var(--color-oxford-blue);
   font-size: 18px;
@@ -1540,8 +1551,8 @@ body .public-app .booking-legend > span {
 .public-app .booking-summary-review {
   padding: 10px 12px;
   border-radius: 8px;
-  background: #fff5df;
-  color: #704c0b;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 
 .public-app .booking-validation-error,
@@ -1687,6 +1698,10 @@ body .public-app .booking-legend > span {
 .public-app .reservation-table-wrap .data-table {
   width: 100%;
   min-width: 562px;
+}
+
+.public-app .reservation-table-wrap .data-table tbody td:first-child > strong {
+  overflow-wrap: anywhere;
 }
 
 body .public-app .site-header {

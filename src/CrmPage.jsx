@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react'
 import { ArrowRight, ArrowUpRight, Bell, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, DoorOpen, Download, Filter, LayoutDashboard, ListChecks, Mail, MapPin, Menu as MenuIcon, MessageCircle, Moon, MoreHorizontal, Plus, Search, ShieldCheck, Sun, Users, X } from 'lucide-react'
-import { API, applyThemePreference, Avatar, Button, ClientProfileDialog, CrmTitle, getProfileRoleLabel, getReservationStartError, getSaoPauloDateTime, hasPhoneInput, ImageUploadField, isValidPhoneNumber, Kpi, LoginInline, Logo, Modal, normalizePhoneToE164, NotificationCenter, PhoneInput, ProfileDialog, readThemePreference, Title, clearStoredUser, formatTimeForDisplay, isGuidedTour, localDateValue, omitPersona, request, reservationStatusLabel, storeUser, unavailableDeadlineLabel } from './App.jsx'
+import { API, addMinutesToTime, applyThemePreference, Avatar, Button, ClientProfileDialog, CrmTitle, getProfileRoleLabel, getReservationStartError, getSaoPauloDateTime, hasPhoneInput, ImageUploadField, isValidPhoneNumber, Kpi, LoginInline, Logo, Modal, normalizePhoneToE164, NotificationCenter, PhoneInput, ProfileDialog, readThemePreference, Title, clearStoredUser, formatTimeForDisplay, isGuidedTour, localDateValue, omitPersona, request, reservationStatusLabel, storeUser, unavailableDeadlineLabel } from './App.jsx'
 import { toNumberOrEmpty } from './numericInput.js'
+import { getApprovalMessage, getHoursForDate, getIsoDayOfWeek, getLatestStartTime, validateOperatingHours } from './openingHours.js'
 
 export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, setReservations, optionalExtensions = [] }) {
   const [section, setSection] = useState('Visão geral')
@@ -28,6 +29,11 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const [reservationPhoneSubmitAttempted, setReservationPhoneSubmitAttempted] = useState(false)
   const [reservationEditBusy, setReservationEditBusy] = useState(false)
   const [reservationEditNow, setReservationEditNow] = useState(() => new Date())
+  const [reservationOperatingHours, setReservationOperatingHours] = useState([])
+  const [reservationOperatingHoursLoading, setReservationOperatingHoursLoading] = useState(false)
+  const [reservationOperatingHoursError, setReservationOperatingHoursError] = useState('')
+  const [reservationEditAttempted, setReservationEditAttempted] = useState(false)
+  const [reservationEditTouched, setReservationEditTouched] = useState({})
   const [negotiationTarget, setNegotiationTarget] = useState(null)
   const [negotiationNote, setNegotiationNote] = useState('')
   const [negotiationError, setNegotiationError] = useState('')
@@ -48,16 +54,53 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const [spaceCoverError, setSpaceCoverError] = useState('')
   const [spaceCoverImage, setSpaceCoverImage] = useState(null)
   const [spaceCoverPreview, setSpaceCoverPreview] = useState('')
-  const reservationEditValidation = reservationEditForm
+  const reservationEditOperatingHours = getHoursForDate(reservationOperatingHours, reservationEditForm?.dataReserva)
+  const reservationEditApprovalMessage = getApprovalMessage(reservationOperatingHours, reservationEditForm?.dataReserva)
+  const reservationEditTimeValidation = reservationEditForm
     ? getReservationStartError(reservationEditForm.dataReserva, reservationEditForm.horarioInicio, reservationEditNow)
+      || (reservationOperatingHours.length
+        ? validateOperatingHours(reservationOperatingHours, reservationEditForm.dataReserva,
+          reservationEditForm.horarioInicio, reservationEditForm.horarioFim)
+        : '')
     : ''
+  const reservationEditValidation = reservationEditAttempted
+    || reservationEditTouched.dataReserva
+    || reservationEditTouched.horarioInicio
+    || reservationEditTouched.horarioFim
+    ? reservationEditTimeValidation
+    : ''
+  const reservationEditLatestStart = reservationEditForm
+    ? getLatestStartTime(reservationOperatingHours, reservationEditForm.dataReserva)
+    : undefined
   const reservationEditLocalTime = getSaoPauloDateTime(reservationEditNow)
+  const reservationEditOpeningTime = reservationEditOperatingHours?.abertura?.slice(0, 5)
+  const reservationEditEarliestStart = reservationEditForm?.dataReserva === reservationEditLocalTime.date
+    && reservationEditLocalTime.time > reservationEditOpeningTime
+    ? reservationEditLocalTime.time
+    : reservationEditOpeningTime
 
   useEffect(() => {
     if (!reservationEditTarget) return undefined
     const interval = window.setInterval(() => setReservationEditNow(new Date()), 15000)
     return () => window.clearInterval(interval)
   }, [reservationEditTarget])
+  useEffect(() => {
+    if (!reservationEditTarget || !reservationEditForm?.idEspaco) {
+      setReservationOperatingHours([])
+      setReservationOperatingHoursLoading(false)
+      setReservationOperatingHoursError('')
+      return undefined
+    }
+    let active = true
+    setReservationOperatingHours([])
+    setReservationOperatingHoursLoading(true)
+    setReservationOperatingHoursError('')
+    request(`/espacos/${reservationEditForm.idEspaco}/horarios-funcionamento`)
+      .then(data => { if (active) setReservationOperatingHours(data) })
+      .catch(error => { if (active) setReservationOperatingHoursError(error.message) })
+      .finally(() => { if (active) setReservationOperatingHoursLoading(false) })
+    return () => { active = false }
+  }, [reservationEditTarget?.idReserva, reservationEditForm?.idEspaco])
   const [spacePhotos, setSpacePhotos] = useState([])
   const [spacePhotosLoading, setSpacePhotosLoading] = useState(false)
   const [spacePhotosBusy, setSpacePhotosBusy] = useState(false)
@@ -312,6 +355,8 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     function editReservation(item) {
       setReservationEditTarget(item)
       setReservationPhoneSubmitAttempted(false)
+      setReservationEditAttempted(false)
+      setReservationEditTouched({})
       setReservationEditForm({
         tituloEvento: item.tituloEvento,
         descricaoFinalidade: item.descricaoFinalidade || '',
@@ -327,8 +372,17 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     async function saveReservationEdit(event) {
       event.preventDefault()
       setReservationPhoneSubmitAttempted(true)
+      setReservationEditAttempted(true)
       if (!reservationEditTarget || !reservationEditForm || reservationEditBusy) return
+      if (reservationOperatingHoursLoading || reservationOperatingHoursError || !reservationOperatingHours.length) {
+        setReservationEditError(reservationOperatingHoursError
+          ? 'Não foi possível consultar o funcionamento. Tente novamente.'
+          : 'Aguarde a validação do horário de funcionamento.')
+        return
+      }
       const validation = getReservationStartError(reservationEditForm.dataReserva, reservationEditForm.horarioInicio)
+        || validateOperatingHours(reservationOperatingHours, reservationEditForm.dataReserva,
+          reservationEditForm.horarioInicio, reservationEditForm.horarioFim)
       if (validation) {
         setReservationEditError(validation)
         return
@@ -357,7 +411,11 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
         setAuditItems(items => [{ time: new Date().toLocaleString('pt-BR'), user: user.nome, action: 'Edição de reserva', target: `${updated.tituloEvento} · reserva #${updated.idReserva}`, detail: 'Alterações salvas pela equipe.' }, ...items])
         setReservationEditTarget(null)
         setReservationEditForm(null)
-        notify(updated.excedeCota ? 'Reserva atualizada. A negociação da cota precisa ser revisada.' : 'Reserva atualizada e auditada.')
+        notify(updated.statusReserva === 'Pendente' && getIsoDayOfWeek(updated.dataReserva) === 7
+          ? 'Reserva atualizada. Status Pendente, aguardando aprovação da equipe.'
+          : updated.excedeCota
+            ? 'Reserva atualizada. A negociação da cota precisa ser revisada.'
+            : 'Reserva atualizada e auditada.')
       } catch (error) {
         setReservationEditError(error.message)
       } finally {
@@ -1115,10 +1173,11 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
           <label>Telefone para contato ou alteração<PhoneInput value={reservationEditForm.telefoneContato} validationAttempted={reservationPhoneSubmitAttempted} onChange={telefoneContato => setReservationEditForm({ ...reservationEditForm, telefoneContato })} /><small>Celular informado pelo solicitante para assuntos desta reserva.</small></label>
         </section>
         <label>Espaço<select value={reservationEditForm.idEspaco} onChange={event => setReservationEditForm({ ...reservationEditForm, idEspaco: event.target.value })}>{spaces.map(space => <option key={space.idEspaco} value={space.idEspaco}>{space.nomeEspaco}</option>)}</select></label>
-        <label>Data<input required type="date" min={reservationEditLocalTime.date} aria-invalid={Boolean(reservationEditValidation && reservationEditForm.dataReserva < reservationEditLocalTime.date)} value={reservationEditForm.dataReserva} onChange={event => { setReservationEditForm({ ...reservationEditForm, dataReserva: event.target.value }); setReservationEditError('') }} /></label>
-        <div className="form-row reservation-edit-time-row"><label>Início<input required type="time" min={reservationEditForm.dataReserva === reservationEditLocalTime.date ? reservationEditLocalTime.time : undefined} aria-invalid={Boolean(reservationEditValidation)} value={reservationEditForm.horarioInicio} onChange={event => { setReservationEditForm({ ...reservationEditForm, horarioInicio: event.target.value }); setReservationEditError('') }} /></label><label>Fim<input required type="time" value={reservationEditForm.horarioFim} onChange={event => setReservationEditForm({ ...reservationEditForm, horarioFim: event.target.value })} /></label></div>
+        <label>Data<input required type="date" min={reservationEditLocalTime.date} aria-invalid={Boolean(reservationEditValidation && reservationEditForm.dataReserva < reservationEditLocalTime.date)} value={reservationEditForm.dataReserva} onChange={event => { setReservationEditForm({ ...reservationEditForm, dataReserva: event.target.value }); setReservationEditError('') }} onBlur={() => setReservationEditTouched(current => ({ ...current, dataReserva: true }))} /></label>
+        {reservationEditApprovalMessage && <p className="booking-guided-note" role="note">{reservationEditApprovalMessage}</p>}
+        <div className="form-row reservation-edit-time-row"><label>Início<input required type="time" min={reservationEditEarliestStart} max={reservationEditLatestStart} aria-invalid={Boolean(reservationEditValidation)} aria-describedby={reservationEditValidation ? 'reservation-edit-hours-error' : undefined} value={reservationEditForm.horarioInicio} onChange={event => { setReservationEditForm({ ...reservationEditForm, horarioInicio: event.target.value }); setReservationEditError('') }} onBlur={() => setReservationEditTouched(current => ({ ...current, horarioInicio: true }))} /></label><label>Fim<input required type="time" min={reservationEditForm.horarioInicio ? addMinutesToTime(reservationEditForm.horarioInicio, 30) : reservationEditOpeningTime} max={reservationEditOperatingHours?.fechamento?.slice(0, 5)} aria-invalid={Boolean(reservationEditValidation)} aria-describedby={reservationEditValidation ? 'reservation-edit-hours-error' : undefined} value={reservationEditForm.horarioFim} onChange={event => { setReservationEditForm({ ...reservationEditForm, horarioFim: event.target.value }); setReservationEditError('') }} onBlur={() => setReservationEditTouched(current => ({ ...current, horarioFim: true }))} /></label></div>
         {isGuidedTour(spaces.find(space => Number(space.idEspaco) === Number(reservationEditForm.idEspaco))?.tipoEspaco) && <label>Quantidade de visitantes<input required type="number" min="1" value={reservationEditForm.quantidadeParticipantes} onChange={event => setReservationEditForm({ ...reservationEditForm, quantidadeParticipantes: event.target.value === '' ? '' : event.target.value })} /></label>}
-        {(reservationEditValidation || reservationEditError) && <p className="form-message" role="alert">{reservationEditValidation || reservationEditError}</p>}
+        {(reservationEditValidation || reservationEditError) && <p id="reservation-edit-hours-error" className="form-message" role="alert">{reservationEditValidation || reservationEditError}</p>}
         <Button type="submit" icon={Check} disabled={reservationEditBusy || Boolean(reservationEditValidation)}>{reservationEditBusy ? 'Salvando...' : 'Salvar alterações'}</Button>
       </form>}
     </Modal>
