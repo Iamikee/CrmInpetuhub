@@ -1312,7 +1312,7 @@ function Home({ spaces, spacesLoaded, onConsultSpace, onRequestReservation, onOp
         <p className="reference-description">Encontre o ambiente certo para se reunir, aprender e fazer acontecer no InPETU Hub.</p>
         <Button icon={CalendarDays} onClick={onOpenCalendar}>Consultar horários</Button>
         <dl className="reference-stats">
-          <div><dt>{formatWeeklyHours(weeklyHours) || (weeklyHoursError ? 'Indisponível' : 'Consultando...')}</dt><dd>Horário de funcionamento semanal</dd></div>
+            <div><dt className="reference-weekly-hours">{(formatWeeklyHours(weeklyHours) || (weeklyHoursError ? 'Indisponível' : 'Consultando...')).replace('. ', '.\n')}</dt><dd>Horário de funcionamento semanal</dd></div>
           <div><dt>{spacesLoaded ? <CountUp value={spaces.filter(space => space.ativo !== false).length} /> : '...'}</dt><dd>Ambientes ativos</dd></div>
           <div><dt>UFSC</dt><dd>Inovação em Florianópolis</dd></div>
         </dl>
@@ -1868,6 +1868,7 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
   const [reservations, setReservations] = useState([])
   const [myReservations, setMyReservations] = useState([])
   const [myReservationsLoaded, setMyReservationsLoaded] = useState(false)
+  const myReservationsRefreshRef = useRef(null)
   const [dataError, setDataError] = useState('')
   const [runtimeConfig, setRuntimeConfig] = useState(null)
   const [runtimeConfigLoaded, setRuntimeConfigLoaded] = useState(false)
@@ -2004,34 +2005,49 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
     if (!user) {
       setMyReservations([])
       setMyReservationsLoaded(false)
+      myReservationsRefreshRef.current = null
       return
     }
     let active = true
-    let refreshing = false
+    let refreshPromise = null
     let refreshTimer
-    const refreshReservations = async () => {
-      if (!active || refreshing) return
-      refreshing = true
-      try {
-        const items = await request('/reservas/minhas')
-        if (!Array.isArray(items)) throw new Error('A API retornou uma lista de reservas inválida.')
-        if (active) setMyReservations(items)
-      } catch (error) {
-        if (active && error.status === 401) {
-          clearStoredUser()
-          setUser(null)
-        } else if (active) {
-          setDataError(error.message)
+    const refreshReservations = (manual = false) => {
+      if (!active) return Promise.resolve(false)
+      if (refreshPromise) return refreshPromise
+      refreshPromise = (async () => {
+        let succeeded = false
+        try {
+          const items = await request('/reservas/minhas')
+          if (!Array.isArray(items)) throw new Error('A API retornou uma lista de reservas inválida.')
+          if (active) setMyReservations(items)
+          succeeded = true
+        } catch (error) {
+          if (active && error.status === 401) {
+            clearStoredUser()
+            setUser(null)
+          } else if (active && !manual) {
+            setDataError(error.message)
+          }
+        } finally {
+          if (active) {
+            setMyReservationsLoaded(true)
+            window.clearTimeout(refreshTimer)
+            refreshTimer = window.setTimeout(() => {
+              refreshPromise = null
+              refreshReservations()
+            }, 15_000)
+          }
+          refreshPromise = null
         }
-      } finally {
-        refreshing = false
-        if (active) {
-          setMyReservationsLoaded(true)
-          window.clearTimeout(refreshTimer)
-          refreshTimer = window.setTimeout(refreshReservations, 15_000)
-        }
-      }
+        return succeeded
+      })()
+      return refreshPromise
     }
+    const refreshManually = () => {
+      window.clearTimeout(refreshTimer)
+      return refreshReservations(true)
+    }
+    myReservationsRefreshRef.current = refreshManually
     const refreshNow = () => {
       window.clearTimeout(refreshTimer)
       refreshTimer = undefined
@@ -2079,6 +2095,7 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
       window.clearTimeout(refreshTimer)
       window.removeEventListener('focus', refreshNow)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
+      if (myReservationsRefreshRef.current === refreshManually) myReservationsRefreshRef.current = null
     }
   }, [user?.idUsuario, user?.email, runtimeConfig, runtimeConfigLoaded])
   function updateCancel(item, reason) {
@@ -2121,7 +2138,7 @@ function AppInner({ onCodeSent, onNavigate, initialView = 'default' }) {
         {requestedFeatureRoute && !activeFeatureRoute && <main className="public-main">{!runtimeConfigLoaded ? <p className="page-loading" role="status">Carregando configuração...</p> : runtimeConfigError ? <p className="form-message" role="alert">{runtimeConfigError}</p> : <section className="empty-inline" aria-labelledby="not-found-title"><strong id="not-found-title">Página não encontrada</strong><p>O endereço solicitado não está disponível.</p></section>}</main>}
         {view === 'portal' && user ? <Suspense fallback={<PageLoading />}><PortalHome user={user} items={myReservations} reservationsLoaded={myReservationsLoaded} onOpenCalendar={openCalendar} onOpenReservations={() => setView('reservations')} /></Suspense> : view === 'portal' && <Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense>}
         {view === 'calendar' && <Reveal key={view} className="route-reveal"><Suspense fallback={<p className="page-loading" role="status">Carregando calendário...</p>}><CalendarPage spaces={spaces} spacesLoaded={spacesLoaded} onReserve={openBooking} initialDate={calendarQuery.date || localDateValue()} initialKind={calendarQuery.kind} initialSpaceId={calendarQuery.spaceId} availabilityVersion={availabilityVersion} /></Suspense></Reveal>}
-        {view === 'reservations' && user ? <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><ReservationsPage items={myReservations} onCancel={updateCancel} /></Suspense></Reveal> : view === 'reservations' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense></Reveal>}
+        {view === 'reservations' && user ? <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><ReservationsPage items={myReservations} onCancel={updateCancel} onBack={() => setView('portal')} reservationsLoaded={myReservationsLoaded} onRefresh={() => myReservationsRefreshRef.current?.() ?? Promise.resolve(false)} /></Suspense></Reveal> : view === 'reservations' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense></Reveal>}
         {view === 'help' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><HelpPage /></Suspense></Reveal>}
         {(view === 'terms' || view === 'privacy') && <LegalPage privacy={view === 'privacy'} optionalPrivacySection={OptionalPrivacySection} optionalTermsSection={OptionalTermsSection} />}
         {view === 'access' && <Reveal key={view} className="route-reveal"><Suspense fallback={<PageLoading />}><AccessPage onLogin={completeLogin} onSignup={() => setView('signup')} onForgotPassword={() => setView('help')} /></Suspense></Reveal>}
