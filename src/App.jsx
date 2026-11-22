@@ -9,7 +9,8 @@ import { normalizeEmail, normalizeFullName, sanitizeNameInput, validateIdentityF
 import { BRAND_LOGOS } from './brand.js'
 import { CountUp, Reveal, useScrollProgress } from './motion/index.js'
 import ErrorBoundary from './ErrorBoundary.jsx'
-import { formatWeeklyHours, getApprovalMessage, getHoursForDate, getIsoDayOfWeek, getLatestStartTime, validateOperatingHours } from './openingHours.js'
+import BookingTimePicker from './BookingTimePicker.jsx'
+import { formatWeeklyHours, getApprovalMessage, getDefaultEndTime, getHoursForDate, getIsoDayOfWeek, getPossibleEndTimes, getTimeSlots, validateOperatingHours } from './openingHours.js'
 
 const CalendarPage = lazy(() => import('./CalendarPage.jsx'))
 const Crm = lazy(() => import('./CrmPage.jsx'))
@@ -1368,36 +1369,74 @@ function Home({ spaces, spacesLoaded, onConsultSpace, onRequestReservation, onOp
     {gallerySpace && <RoomGallery space={gallerySpace} onClose={() => setGallerySpace(null)} onConsultSpace={onConsultSpace} onRequestReservation={onRequestReservation} />}
   </>
 }
-function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTime, initialEndTime, user }) {
+export function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTime, initialEndTime, user }) {
+  const bookingTimePickerId = `booking-time-picker-${useId()}`
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
   const [operatingHours, setOperatingHours] = useState([])
   const [operatingHoursLoading, setOperatingHoursLoading] = useState(false)
   const [operatingHoursError, setOperatingHoursError] = useState('')
+  const [bookingAvailability, setBookingAvailability] = useState([])
+  const [bookingAvailabilityLoading, setBookingAvailabilityLoading] = useState(false)
+  const [bookingAvailabilityError, setBookingAvailabilityError] = useState('')
   const [scheduleAttempted, setScheduleAttempted] = useState(false)
   const [scheduleTouched, setScheduleTouched] = useState({})
-  const [form, setForm] = useState({ dataReserva: '', horarioInicio: '09:00', horarioFim: '10:00', tituloEvento: '', descricaoFinalidade: '', quantidadeParticipantes: '', telefoneContato: '' })
+  const [timePickerOpen, setTimePickerOpen] = useState(() => !(initialTime && initialEndTime))
+  const [timePickerGeneration, setTimePickerGeneration] = useState(0)
+  const [form, setForm] = useState({ dataReserva: '', horarioInicio: '', horarioFim: '', tituloEvento: '', descricaoFinalidade: '', quantidadeParticipantes: '', telefoneContato: '' })
   const guidedTour = isGuidedTour(space?.tipoEspaco)
   const selectedDayHours = getHoursForDate(operatingHours, form.dataReserva)
   const scheduleValidation = validateOperatingHours(operatingHours, form.dataReserva, form.horarioInicio, form.horarioFim)
   const selectedDayApproval = getApprovalMessage(operatingHours, form.dataReserva)
-  const operatingOpeningTime = selectedDayHours?.abertura?.slice(0, 5)
   const localNow = getSaoPauloDateTime()
-  const earliestStartTime = form.dataReserva === localNow.date && localNow.time > operatingOpeningTime
-    ? localNow.time
-    : operatingOpeningTime
-  const visibleScheduleValidation = scheduleAttempted || scheduleTouched.dataReserva || scheduleTouched.horarioInicio || scheduleTouched.horarioFim
+  const reservationDateLabel = form.dataReserva
+    ? new Date(`${form.dataReserva}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : 'Não selecionada'
+  const reservationDurationMinutes = form.horarioInicio && form.horarioFim
+    ? (Number(form.horarioFim.slice(0, 2)) * 60 + Number(form.horarioFim.slice(3, 5))) -
+      (Number(form.horarioInicio.slice(0, 2)) * 60 + Number(form.horarioInicio.slice(3, 5)))
+    : 0
+  const reservationDurationHours = Math.floor(reservationDurationMinutes / 60)
+  const reservationDurationLabel = [
+    reservationDurationHours ? `${reservationDurationHours} h` : '',
+    reservationDurationMinutes % 60 ? `${reservationDurationMinutes % 60} min` : '',
+  ].filter(Boolean).join(' ')
+  const reservationTimeLabel = form.horarioInicio && form.horarioFim
+    ? `${form.horarioInicio} às ${form.horarioFim} (${reservationDurationLabel})`
+    : 'Horário não selecionado'
+  const possibleEndTimes = getPossibleEndTimes(operatingHours, form.dataReserva, form.horarioInicio, bookingAvailability, localNow)
+  const startTimes = getTimeSlots(operatingHours, form.dataReserva)
+  const startDisabledReasons = Object.fromEntries(startTimes.map(time => {
+    const reservation = bookingAvailability.find(item => {
+      const start = String(item.inicio || item.horarioInicio || '').slice(0, 5)
+      const end = String(item.fim || item.horarioFim || '').slice(0, 5)
+      return time < end && addMinutesToTime(time, 30) > start
+    })
+    const reason = form.dataReserva === localNow.date && time < localNow.time
+      ? 'horário já passado'
+      : reservation
+        ? reservation.statusReserva === 'Pendente' ? 'em análise' : 'ocupado'
+        : getPossibleEndTimes(operatingHours, form.dataReserva, time, bookingAvailability, localNow).length === 0
+          ? 'sem horário de fim disponível'
+          : ''
+    return [time, reason]
+  }))
+  const disabledStartTimes = new Set(Object.keys(startDisabledReasons).filter(time => startDisabledReasons[time]))
+  const timeFieldsDisabled = operatingHoursLoading || Boolean(operatingHoursError) || !selectedDayHours || selectedDayHours.fechado ||
+    bookingAvailabilityLoading || Boolean(bookingAvailabilityError)
+  const timeSelectionInvalid = !form.horarioInicio || !possibleEndTimes.includes(form.horarioFim)
+  const visibleScheduleValidation = scheduleAttempted || scheduleTouched.dataReserva
     ? scheduleValidation
     : ''
-  const timeFieldsDisabled = operatingHoursLoading || Boolean(operatingHoursError) || !selectedDayHours || selectedDayHours.fechado
-  const latestStartTime = getLatestStartTime(operatingHours, form.dataReserva)
   useEffect(() => {
     if (!space) return
-    const horarioInicio = guidedTour ? initialTime || '' : initialTime || '09:00'
-    const defaults = { dataReserva: initialDate || localDateValue(), horarioInicio, horarioFim: guidedTour ? initialEndTime || '' : initialEndTime || addMinutesToTime(horarioInicio, 30), tituloEvento: '', descricaoFinalidade: '', quantidadeParticipantes: '', telefoneContato: normalizePhoneToE164(user?.telefone) }
+    const defaults = { dataReserva: initialDate || localDateValue(), horarioInicio: initialTime || '', horarioFim: initialEndTime || '', tituloEvento: '', descricaoFinalidade: '', quantidadeParticipantes: '', telefoneContato: normalizePhoneToE164(user?.telefone) }
     const draft = consumeBookingDraft(space.idEspaco)
-    setForm({ ...defaults, ...(draft?.form || {}) })
+    const nextForm = { ...defaults, ...(draft?.form || {}) }
+    setForm(nextForm)
+    setTimePickerOpen(!(nextForm.horarioInicio && nextForm.horarioFim))
+    setTimePickerGeneration(generation => generation + 1)
     setMessage('')
     setPhoneSubmitAttempted(false)
     setScheduleAttempted(false)
@@ -1420,6 +1459,23 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
       .finally(() => { if (active) setOperatingHoursLoading(false) })
     return () => { active = false }
   }, [space?.idEspaco])
+  useEffect(() => {
+    if (!space || !form.dataReserva) {
+      setBookingAvailability([])
+      setBookingAvailabilityLoading(false)
+      setBookingAvailabilityError('')
+      return
+    }
+    let active = true
+    setBookingAvailability([])
+    setBookingAvailabilityLoading(true)
+    setBookingAvailabilityError('')
+    request(`/espacos/${space.idEspaco}/agenda?data=${encodeURIComponent(form.dataReserva)}`)
+      .then(data => { if (active) setBookingAvailability(data) })
+      .catch(error => { if (active) setBookingAvailabilityError(error.message) })
+      .finally(() => { if (active) setBookingAvailabilityLoading(false) })
+    return () => { active = false }
+  }, [space?.idEspaco, form.dataReserva])
   async function submit(event) {
     event.preventDefault()
     setPhoneSubmitAttempted(true)
@@ -1428,6 +1484,16 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
       setMessage(operatingHoursError
         ? 'Não foi possível consultar o funcionamento. Tente novamente.'
         : 'Aguarde a validação do horário de funcionamento.')
+      return
+    }
+    if (bookingAvailabilityLoading || bookingAvailabilityError) {
+      setMessage(bookingAvailabilityError
+        ? 'Não foi possível consultar a disponibilidade. Tente novamente.'
+        : 'Aguarde a validação da disponibilidade.')
+      return
+    }
+    if (timeSelectionInvalid) {
+      setMessage('Escolha um horário de início e um fim disponível.')
       return
     }
     if (scheduleValidation) {
@@ -1473,7 +1539,35 @@ function BookingModal({ space, close, onSaved, openLogin, initialDate, initialTi
         <strong>Contato para esta reserva</strong>
         <label>Telefone para contato ou alteração<PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm(current => ({ ...current, telefoneContato }))} validationAttempted={phoneSubmitAttempted} /><small>Usaremos este número caso seja necessário falar sobre a solicitação.</small></label>
       </section>
-      <label><span>{guidedTour ? 'Data preferida da visita' : 'Data do encontro'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="date" min={localNow.date} value={form.dataReserva} aria-invalid={Boolean(visibleScheduleValidation)} aria-describedby={visibleScheduleValidation ? 'booking-hours-error' : undefined} onChange={e => setForm({ ...form, dataReserva: e.target.value })} onBlur={() => setScheduleTouched(current => ({ ...current, dataReserva: true }))} /></label><div className="field-pair"><label><span>{guidedTour ? 'Horário preferido de início' : 'Início'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min={earliestStartTime} max={latestStartTime} step="1800" disabled={timeFieldsDisabled} value={form.horarioInicio} aria-invalid={Boolean(visibleScheduleValidation)} aria-describedby={visibleScheduleValidation ? 'booking-hours-error' : undefined} onChange={e => setForm({ ...form, horarioInicio: e.target.value })} onBlur={() => setScheduleTouched(current => ({ ...current, horarioInicio: true }))} /></label><label><span>{guidedTour ? 'Horário preferido de término' : 'Fim'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="time" min={form.horarioInicio ? addMinutesToTime(form.horarioInicio, 30) : operatingOpeningTime} max={selectedDayHours?.fechamento?.slice(0, 5)} step="1800" disabled={timeFieldsDisabled} value={form.horarioFim} aria-invalid={Boolean(visibleScheduleValidation)} aria-describedby={visibleScheduleValidation ? 'booking-hours-error' : undefined} onChange={e => setForm({ ...form, horarioFim: e.target.value })} onBlur={() => setScheduleTouched(current => ({ ...current, horarioFim: true }))} /></label></div>
+      <label><span>{guidedTour ? 'Data preferida da visita' : 'Data do encontro'} <span className="required-indicator" aria-hidden="true">*</span></span><input required type="date" min={localNow.date} value={form.dataReserva} aria-invalid={Boolean(visibleScheduleValidation)} aria-describedby={visibleScheduleValidation ? 'booking-hours-error' : undefined} onChange={e => setForm(current => ({ ...current, dataReserva: e.target.value, horarioInicio: '', horarioFim: '' }))} onBlur={() => setScheduleTouched(current => ({ ...current, dataReserva: true }))} /></label>
+      {!timePickerOpen && <div className="booking-modal-time-summary">
+        <div><small>Data</small><strong>{reservationDateLabel}</strong></div>
+        <div><small>Horário</small><strong>{reservationTimeLabel}</strong></div>
+        <button type="button" className="booking-modal-time-toggle" aria-expanded="false" aria-controls={bookingTimePickerId} onClick={() => setTimePickerOpen(true)}>Alterar horário</button>
+      </div>}
+      <div id={bookingTimePickerId} className="booking-modal-time-editor" hidden={!timePickerOpen}>
+        {bookingAvailabilityLoading && <p className="booking-state" role="status">Consultando disponibilidade...</p>}
+        {bookingAvailabilityError && <p className="booking-validation-error" role="alert">Não foi possível consultar a disponibilidade: {bookingAvailabilityError}</p>}
+        {!bookingAvailabilityLoading && !bookingAvailabilityError && <BookingTimePicker
+          key={timePickerGeneration}
+          startTime={form.horarioInicio}
+          endTime={form.horarioFim}
+          startTimes={startTimes}
+          possibleEndTimes={possibleEndTimes}
+          disabledStartTimes={disabledStartTimes}
+          startDisabledReasons={startDisabledReasons}
+          disabled={timeFieldsDisabled}
+          onStartChange={time => setForm(current => ({
+            ...current,
+            horarioInicio: time,
+            horarioFim: time ? getDefaultEndTime(getPossibleEndTimes(operatingHours, current.dataReserva, time, bookingAvailability, localNow), time) : '',
+          }))}
+          onEndChange={horarioFim => setForm(current => ({ ...current, horarioFim }))}
+        />}
+        <button type="button" className="booking-modal-time-toggle" aria-expanded="true" aria-controls={bookingTimePickerId} onClick={() => setTimePickerOpen(false)}>
+          {form.horarioInicio && form.horarioFim ? 'Concluir' : 'Fechar'}
+        </button>
+      </div>
       {selectedDayApproval && <p className="booking-guided-note" role="note">{selectedDayApproval}</p>}
       {visibleScheduleValidation && <p id="booking-hours-error" className="booking-validation-error" role="alert">{visibleScheduleValidation}</p>}
       {guidedTour && <label>Quantidade de visitantes<input required type="number" min="1" max={space?.capacidadePessoas || 20} value={form.quantidadeParticipantes} onChange={e => setForm({ ...form, quantidadeParticipantes: e.target.value === '' ? '' : e.target.value })} /><small>Capacidade máxima: {space?.capacidadePessoas || 20} pessoas.</small></label>}

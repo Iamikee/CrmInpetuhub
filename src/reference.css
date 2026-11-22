@@ -1715,6 +1715,172 @@ body .public-app .booking-legend > span {
   gap: 10px;
 }
 
+.booking-time-picker {
+  display: grid;
+  gap: 16px;
+}
+
+.booking-time-picker .booking-time-step {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.booking-time-picker .booking-time-step legend,
+.booking-time-picker .booking-time-step h3 {
+  margin: 0 0 10px;
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.booking-time-picker .booking-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 8px;
+}
+
+.booking-time-picker .booking-choice-option {
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid #dce4ed;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.booking-time-picker .booking-choice-option:hover:not(:disabled),
+.booking-time-picker .booking-choice-option:focus-visible {
+  border-color: var(--color-french-blue);
+  outline: 2px solid color-mix(in srgb, var(--color-french-blue) 30%, transparent);
+  outline-offset: 1px;
+}
+
+.booking-time-picker .booking-choice-option:disabled {
+  cursor: not-allowed;
+  background: #f1f5f9;
+  color: #64748b;
+  opacity: 1;
+}
+
+.booking-time-picker .booking-choice-option small {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.booking-time-picker .booking-end-option > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.booking-time-picker .booking-choice-check {
+  color: var(--color-success);
+}
+
+.booking-time-picker .booking-choice-selected {
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.booking-time-picker .booking-more-times {
+  grid-column: 1 / -1;
+  min-height: 46px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+  color: var(--color-brand-accessible);
+  font-weight: 700;
+}
+
+.booking-time-picker .booking-locked-start {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid #dce4ed;
+  border-radius: 9px;
+  background: #f8fafc;
+  color: var(--color-oxford-blue);
+}
+
+.booking-time-picker .booking-change-start {
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-french-blue);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-french-blue);
+  font-weight: 700;
+}
+
+.booking-time-picker .booking-time-summary {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.booking-modal-time-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+
+.booking-modal-time-summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.booking-modal-time-summary small {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.booking-modal-time-summary strong {
+  color: var(--color-text);
+  font-size: 15px;
+}
+
+.booking-modal-time-toggle {
+  grid-column: 1 / -1;
+  min-height: 46px;
+  border: 1px solid var(--color-brand-accessible);
+  border-radius: 9px;
+  background: var(--color-brand-accessible);
+  color: var(--on-blue);
+  font-weight: 700;
+}
+
+.booking-modal-time-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.booking-modal-time-editor[hidden] {
+  display: none;
+}
+
 .public-app .booking-time-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));

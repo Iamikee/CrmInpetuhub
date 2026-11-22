@@ -66,6 +66,52 @@ export function getTimeSlots(schedule, date, stepMinutes = 30) {
   return slots
 }
 
+export function getPossibleEndTimes(schedule, date, start, reservations = [], now = null, stepMinutes = 30) {
+  const hours = getHoursForDate(schedule, date)
+  if (!hours || hours.fechado || !hours.abertura || !hours.fechamento || !start) return []
+  if (now && (date < now.date || (date === now.date && start < now.time))) return []
+
+  const toMinutes = value => Number(String(value).slice(0, 2)) * 60 + Number(String(value).slice(3, 5))
+  const toTime = minutes => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+  const startMinutes = toMinutes(start)
+  const opening = toMinutes(hours.abertura)
+  const closing = toMinutes(hours.fechamento)
+  if (startMinutes < opening || startMinutes >= closing) return []
+
+  const possibleEnds = []
+  for (let endMinutes = startMinutes + stepMinutes; endMinutes <= closing; endMinutes += stepMinutes) {
+    const end = toTime(endMinutes)
+    const conflicts = reservations.some(reservation => {
+      const reservationStart = String(reservation.inicio || reservation.horarioInicio || '').slice(0, 5)
+      const reservationEnd = String(reservation.fim || reservation.horarioFim || '').slice(0, 5)
+      return reservationStart && reservationEnd && start < reservationEnd && end > reservationStart
+    })
+    if (conflicts) break
+    possibleEnds.push(end)
+  }
+  return possibleEnds
+}
+
+export function getDefaultEndTime(possibleEnds, start) {
+  if (!possibleEnds.length || !start) return ''
+  const oneHourMinutes = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5)) + 60
+  const oneHourEnd = `${String(Math.floor(oneHourMinutes / 60)).padStart(2, '0')}:${String(oneHourMinutes % 60).padStart(2, '0')}`
+  return possibleEnds.includes(oneHourEnd) ? oneHourEnd : possibleEnds[possibleEnds.length - 1]
+}
+
+export function getEndTimeDisplayOptions(possibleEnds, selectedEnd, expanded = null) {
+  const initialOptions = possibleEnds.slice(0, 8)
+  const selectedIsBeyondLimit = selectedEnd && possibleEnds.indexOf(selectedEnd) >= initialOptions.length
+  const isExpanded = expanded === null ? Boolean(selectedIsBeyondLimit) : expanded
+  const visibleEndTimes = isExpanded ? [...possibleEnds] : [...initialOptions]
+  if (!isExpanded && selectedIsBeyondLimit) visibleEndTimes.push(selectedEnd)
+  return {
+    visibleEndTimes,
+    hasMore: possibleEnds.length > initialOptions.length,
+    expanded: isExpanded,
+  }
+}
+
 function displayTime(value) {
   return String(value).slice(0, 5)
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Users } from 'lucide-react'
 import { Button, RoomPhoto, Title, addMinutesToTime, isGuidedTour, localDateValue, request, saoPauloDateTime } from './App.jsx'
-import { formatWeeklyHours, getApprovalMessage, getClosedDayMessage, getHoursForDate, getTimeSlots, validateOperatingHours } from './openingHours.js'
+import BookingTimePicker from './BookingTimePicker.jsx'
+import { formatWeeklyHours, getApprovalMessage, getClosedDayMessage, getDefaultEndTime, getHoursForDate, getPossibleEndTimes, getTimeSlots, validateOperatingHours } from './openingHours.js'
 
 export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, initialKind, initialSpaceId, availabilityVersion }) {
   const [date, setDate] = useState(initialDate)
@@ -24,7 +25,6 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId || '')
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
-  const [nextSlotSelection, setNextSlotSelection] = useState('start')
   const [saoPauloNow, setSaoPauloNow] = useState(saoPauloDateTime)
   const selectedSpaceCandidate = orderedSpaces.find(space => String(space.idEspaco) === selectedSpaceId)
   const unavailableSpace = selectedSpaceCandidate?.ativo === false ? selectedSpaceCandidate : null
@@ -49,7 +49,6 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
   useEffect(() => {
     setStartTime('')
     setEndTime('')
-    setNextSlotSelection('start')
   }, [date, selectedSpace?.idEspaco])
   useEffect(() => {
     if (!selectedSpace || !date || selectedSpace.ativo === false) {
@@ -97,6 +96,7 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
   const selectedDateClosed = selectedOperatingHours?.fechado === true
   const selectedDateApproval = getApprovalMessage(operatingHours, date)
   const slots = getTimeSlots(operatingHours, date)
+  const possibleEndTimes = getPossibleEndTimes(operatingHours, date, startTime, availability, saoPauloNow)
   const monthStart = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1, 12)
   const monthDays = Array.from({ length: new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0).getDate() }, (_, index) => {
     const day = new Date(monthStart)
@@ -104,11 +104,6 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
     return day
   })
   const displayDate = selectedDay.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const slotGroups = [
-    { label: 'Manhã', times: slots.filter(time => time < '12:00') },
-    { label: 'Tarde', times: slots.filter(time => time >= '12:00' && time < '18:00') },
-    { label: 'Noite', times: slots.filter(time => time >= '18:00') },
-  ].filter(group => group.times.length > 0)
   function reservationAt(time) {
     const end = addMinutesToTime(time, 30)
     return availability.find(reservation => {
@@ -154,24 +149,30 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
     ? (Number(endTime.slice(0, 2)) * 60 + Number(endTime.slice(3, 5))) - (Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3, 5)))
     : 0
   const reservationDurationLabel = reservationDurationMinutes
-    ? `${Math.floor(reservationDurationMinutes / 60) ? `${Math.floor(reservationDurationMinutes / 60)}h` : ''}${reservationDurationMinutes % 60 ? `${Math.floor(reservationDurationMinutes / 60) ? ' ' : ''}${reservationDurationMinutes % 60}min` : ''}`
+    ? `${Math.floor(reservationDurationMinutes / 60) ? `${Math.floor(reservationDurationMinutes / 60)} h` : ''}${reservationDurationMinutes % 60 ? `${Math.floor(reservationDurationMinutes / 60) ? ' ' : ''}${reservationDurationMinutes % 60} min` : ''}`
     : ''
   function selectStartTime(time) {
     setStartTime(time)
-    setEndTime('')
-    setNextSlotSelection('end')
+    setEndTime(getDefaultEndTime(getPossibleEndTimes(operatingHours, date, time, availability, saoPauloNow), time))
   }
-  function selectSlotTime(time) {
-    if (nextSlotSelection === 'start' || !startTime || endTime) {
-      selectStartTime(time)
+  const startDisabledReasons = Object.fromEntries(slots.map(time => {
+    const reason = date === saoPauloNow.date && time < saoPauloNow.time
+      ? 'horário já passado'
+      : reservationAt(time)
+        ? reservationAt(time).statusReserva === 'Pendente' ? 'em análise' : 'ocupado'
+        : getPossibleEndTimes(operatingHours, date, time, availability, saoPauloNow).length === 0
+          ? 'sem horário de fim disponível'
+          : ''
+    return [time, reason]
+  }))
+  const disabledStartTimes = new Set(Object.keys(startDisabledReasons).filter(time => startDisabledReasons[time]))
+  function changeStart(time) {
+    if (!time) {
+      setStartTime('')
+      setEndTime('')
       return
     }
-    if (time >= startTime) {
-      setEndTime(addMinutesToTime(time, 30))
-      setNextSlotSelection('start')
-      return
-    }
-    if (time < startTime) selectStartTime(time)
+    selectStartTime(time)
   }
   function selectDate(day) {
     const value = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
@@ -256,29 +257,19 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
           {guidedTour && <p className="booking-guided-note" role="note">Visitas guiadas exigem análise da equipe. O horário solicitado fica reservado enquanto aguarda a avaliação.</p>}
           {selectedDateApproval && <p className="booking-guided-note" role="note">{selectedDateApproval}</p>}
           {!selectedSpace ? <p className="booking-state">{unavailableSpace ? `${unavailableSpace.nomeEspaco}: ${unavailableSpace.motivoIndisponibilidade || 'Este espaço está temporariamente indisponível.'}` : 'Escolha um espaço para consultar os horários.'}</p> : operatingHoursLoading ? <p className="booking-state" role="status">Consultando o funcionamento...</p> : operatingHoursError ? <p className="booking-state" role="alert">Não foi possível consultar o funcionamento: {operatingHoursError}</p> : selectedDateClosed ? <p className="booking-state" role="status">{getClosedDayMessage(date)}</p> : availabilityLoading ? <p className="booking-state" role="status">Consultando disponibilidade...</p> : availabilityError ? <div className="booking-error" role="alert"><span>Não foi possível consultar a disponibilidade: {availabilityError}</span><button type="button" onClick={() => setAvailabilityReload(value => value + 1)}>Tentar novamente</button></div> : <div className="booking-time-groups">
-            <p className="catalog-time-help">Clique no primeiro e no último horário que você quer reservar.</p>
-            {slotGroups.map(group => <section className="booking-time-group" key={group.label} aria-label={group.label}>
-              <Title as="h3">{group.label}</Title><div className="booking-time-grid">{group.times.map(time => {
-                const reservation = reservationAt(time)
-                const status = reservation ? (reservation.statusReserva === 'Pendente' ? 'pending' : 'busy') : 'free'
-                const statusLabel = reservation ? (reservation.statusReserva === 'Pendente' ? 'Em análise' : 'Ocupado') : 'Livre'
-                const slotEndTime = addMinutesToTime(time, 30)
-                const isSelectedStart = time === startTime
-                const isSelectedRange = startTime && endTime && time >= startTime && time < endTime
-                const isSelectedEnd = endTime && time === addMinutesToTime(endTime, -30)
-                const isPastToday = date === saoPauloNow.date && time < saoPauloNow.time
-                const rangeWouldConflict = nextSlotSelection === 'end' && startTime && time >= startTime &&
-                  !isRangeAvailable(startTime, addMinutesToTime(time, 30))
-                const disabled = isPastToday || Boolean(reservation) || Boolean(rangeWouldConflict)
-                const unavailableReason = isPastToday ? 'horário já passado' : reservation ? statusLabel : rangeWouldConflict ? 'o intervalo inclui um horário ocupado ou em análise' : statusLabel
-                return <button key={time} type="button" className={`booking-time-option booking-time-${status} ${isSelectedRange && !reservation ? 'booking-time-in-range' : ''} ${isSelectedStart ? 'booking-time-start' : ''} ${isSelectedEnd ? 'booking-time-end' : ''}`} disabled={disabled} onClick={() => selectSlotTime(time)} aria-label={`${time}-${slotEndTime}, ${disabled ? unavailableReason : statusLabel}${isSelectedStart ? ', início selecionado' : ''}${isSelectedEnd ? ', fim selecionado' : ''}`}>
-                  <span className="booking-time-dot" aria-hidden="true" /><strong>{time}</strong>
-                </button>
-              })}</div>
-            </section>)}
+            <BookingTimePicker
+              startTime={startTime}
+              endTime={endTime}
+              startTimes={slots}
+              possibleEndTimes={possibleEndTimes}
+              disabledStartTimes={disabledStartTimes}
+              startDisabledReasons={startDisabledReasons}
+              onStartChange={changeStart}
+              onEndChange={setEndTime}
+            />
           </div>}
           {startTime && endTime > startTime && !availabilityLoading && !availabilityError && !isRangeAvailable(startTime, endTime) && <p className="booking-validation-error" role="alert">{validateOperatingHours(operatingHours, date, startTime, endTime) || 'O período escolhido inclui um horário ocupado ou em análise.'}</p>}
-          <p className="booking-hours-note">Funcionamento semanal: {formatWeeklyHours(operatingHours) || (operatingHoursError ? 'Indisponível' : 'Carregando...')}. Horários ocupados ou em análise não podem ser reservados.</p>
+          <p className="booking-hours-note">Funcionamento semanal: {formatWeeklyHours(operatingHours).replace(/\.$/, '') || (operatingHoursError ? 'Indisponível' : 'Carregando...')}. Horários ocupados ou em análise não podem ser reservados.</p>
         </section>
       </div>
 
