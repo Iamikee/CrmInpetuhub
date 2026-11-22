@@ -42,12 +42,49 @@ describe('reservations page', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows a styled empty state without table headings when the category has no reservations', () => {
+  it('shows a styled empty state without table headings when there are no reservations', () => {
     renderPage()
 
-    expect(screen.getByText('Nenhuma reserva nesta categoria.')).toBeTruthy()
+    expect(screen.getByText('Nenhuma reserva encontrada com esses filtros')).toBeTruthy()
     expect(document.querySelector('table')).toBeNull()
     expect(document.querySelector('.reservations-empty svg')).toBeTruthy()
+  })
+
+  it('filters by title after typing and clears active filters', async () => {
+    renderPage({ items: [reservation({ tituloEvento: 'Oficina de prototipagem' }), reservation({ idReserva: 13, tituloEvento: 'Encontro de pesquisa' })] })
+    const search = screen.getByRole('searchbox', { name: 'Buscar por nome, espaço ou solicitação' })
+
+    fireEvent.change(search, { target: { value: 'oficina' } })
+
+    expect(await screen.findByText('Mostrando 1 de 2 reservas')).toBeTruthy()
+    expect(screen.getByText('Oficina de prototipagem')).toBeTruthy()
+    expect(screen.queryByText('Encontro de pesquisa')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Limpar filtros' }))
+    expect(screen.getByText('Mostrando 2 de 2 reservas')).toBeTruthy()
+  })
+
+  it('searches by the space name from the loaded space list', async () => {
+    renderPage({
+      items: [reservation({ espaco: undefined, idEspaco: 6 })],
+      spaces: [{ idEspaco: 6, nomeEspaco: 'Sala de inovação' }],
+    })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar por nome, espaço ou solicitação' }), { target: { value: 'inovacao' } })
+
+    expect(await screen.findByText('Mostrando 1 de 1 reservas')).toBeTruthy()
+  })
+
+  it('announces an inverted date range after the date field loses focus without applying it', () => {
+    renderPage({ items: [reservation(), reservation({ idReserva: 13, dataReserva: dateOffset(21) })] })
+    const from = screen.getByLabelText('De')
+    const to = screen.getByLabelText('Até')
+
+    fireEvent.change(from, { target: { value: '2026-11-23' } })
+    fireEvent.change(to, { target: { value: '2026-11-22' } })
+    expect(screen.queryByText('A data Até deve ser igual ou posterior à data De.')).toBeNull()
+
+    fireEvent.blur(to)
+    expect(screen.getByText('A data Até deve ser igual ou posterior à data De.')).toBeTruthy()
+    expect(screen.getByText('Mostrando 2 de 2 reservas')).toBeTruthy()
   })
 
   it('shows the initial loading state', () => {
