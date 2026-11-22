@@ -702,6 +702,59 @@ class ReservaServiceTest {
     }
 
     @Test
+    void cancelarReservaAlheiaComoPerfil5NaoLancaErro() {
+        Usuario desenvolvedor = new Usuario();
+        desenvolvedor.setIdUsuario(5);
+        desenvolvedor.setIdPerfil(5);
+        desenvolvedor.setAtivo(true);
+        Usuario solicitante = new Usuario();
+        solicitante.setIdUsuario(7);
+        solicitante.setIdPerfil(4);
+        solicitante.setAtivo(true);
+        Reserva reserva = new Reserva();
+        reserva.setIdReserva(14);
+        reserva.setIdEspaco(2);
+        reserva.setIdSolicitante(7);
+        reserva.setDataReserva(LocalDate.now().plusDays(15));
+        reserva.setHorarioInicio(LocalTime.of(9, 0));
+        reserva.setHorarioFim(LocalTime.of(10, 0));
+        reserva.setStatusReserva("Confirmada");
+        when(usuarios.findByEmail("desenvolvedor@inpetu.ufsc.br")).thenReturn(Optional.of(desenvolvedor));
+        when(usuarios.findById(7)).thenReturn(Optional.of(solicitante));
+        when(usuarios.findAllByAtivoTrueAndIdPerfilLessThan(4)).thenReturn(List.of());
+        when(reservas.findById(14)).thenReturn(Optional.of(reserva));
+        when(reservas.save(any(Reserva.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertDoesNotThrow(() ->
+                service.cancelar(14, "Cancelamento pela equipe", "desenvolvedor@inpetu.ufsc.br"));
+
+        assertEquals("Cancelada", reserva.getStatusReserva());
+        verify(reservas).save(reserva);
+    }
+
+    @Test
+    void cancelarReservaAlheiaComoPerfil4RecebeForbidden() {
+        Usuario coordenador = new Usuario();
+        coordenador.setIdUsuario(4);
+        coordenador.setIdPerfil(4);
+        coordenador.setAtivo(true);
+        Reserva reserva = new Reserva();
+        reserva.setIdReserva(14);
+        reserva.setIdSolicitante(7);
+        reserva.setDataReserva(LocalDate.now().plusDays(15));
+        reserva.setStatusReserva("Confirmada");
+        when(usuarios.findByEmail("coordenador@inpetu.ufsc.br")).thenReturn(Optional.of(coordenador));
+        when(reservas.findById(14)).thenReturn(Optional.of(reserva));
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.cancelar(14, "Cancelamento solicitado", "coordenador@inpetu.ufsc.br"));
+
+        assertEquals(HttpStatus.FORBIDDEN, error.getStatusCode());
+        assertEquals("Você não pode cancelar esta reserva.", error.getReason());
+        verify(reservas, never()).save(any());
+    }
+
+    @Test
     void equipePodeCancelarComMenosDeQuinzeDias() {
         Usuario equipe = new Usuario();
         equipe.setIdUsuario(2);
