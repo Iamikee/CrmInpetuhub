@@ -492,6 +492,17 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     }, ...items])
     notify('Cadastro desativado. O histórico foi preservado.')
   }
+  async function updateClientAccess(client, ativo) {
+    const updated = await request(`/usuarios/${client.idUsuario}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ativo }),
+    })
+    setStaff(items => items.map(person => person.idUsuario === updated.idUsuario ? { ...person, ...updated } : person))
+    setClientUsers(items => items.map(person => person.idUsuario === updated.idUsuario ? { ...person, ...updated } : person))
+    setClientProfile(current => current?.idUsuario === updated.idUsuario ? { ...current, ...updated } : current)
+    notify(ativo ? 'Acesso reativado.' : 'Acesso inativado.')
+    return updated
+  }
   async function createRegistration(event) {
     event.preventDefault()
     setRegistrationPhoneSubmitAttempted(true)
@@ -1162,7 +1173,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
             <td>{person.email}</td>
             <td>{getProfileRoleLabel(person)}</td>
             <td><span className={`status-pill ${person.ativo ? 'status-confirmed' : 'status-cancelled'}`}><i />{person.ativo ? 'Ativo' : 'Inativo'}</span></td>
-            <td>{isCurrentUser ? <span className="table-action-disabled" title="Você não pode alterar seu próprio perfil">Seu perfil</span> : <><button type="button" className="table-action" onClick={() => openUserFicha(person)}>Abrir ficha</button>{user.perfil === 5 && person.idPerfil !== 5 && <button type="button" className="table-action" onClick={async () => { try { await request(`/usuarios/${person.idUsuario}/promover-desenvolvedor`, { method: 'POST' }); const codigo = window.prompt('Informe o código de seis dígitos enviado por e-mail') ; if (!codigo) return; await request(`/usuarios/${person.idUsuario}/promover-desenvolvedor/confirmar`, { method: 'POST', body: JSON.stringify({ codigo }) }); notify('Usuário promovido a Desenvolvedor / Admin.') } catch (error) { notify(error.message) } }}>Promover</button>}</>}</td>
+            <td>{isCurrentUser ? <span className="table-action-disabled" title="Você não pode alterar seu próprio perfil">Seu perfil</span> : <><button type="button" className="table-action" onClick={() => openUserFicha(person)}>Abrir ficha</button>{user.perfil === 5 && person.idPerfil !== 5 && <button type="button" className="table-action" onClick={async () => { try { await request(`/usuarios/${person.idUsuario}/promover-desenvolvedor`, { method: 'POST' }); const codigo = window.prompt('Enviamos o código para o seu e-mail. Informe os seis dígitos para confirmar a promoção.') ; if (!codigo) return; await request(`/usuarios/${person.idUsuario}/promover-desenvolvedor/confirmar`, { method: 'POST', body: JSON.stringify({ codigo }) }); notify('Usuário promovido a Desenvolvedor / Admin.') } catch (error) { notify(error.message) } }}>Promover</button>}</>}</td>
           </tr>
         })}</tbody></table></div></>}
       </div></main>{toast && <div className="toast"><Check size={17} />{toast}</div>}
@@ -1197,7 +1208,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       {negotiationError && <p className="form-message" role="alert">{negotiationError}</p>}
       <Button icon={Check} disabled={!negotiationNote.trim() || negotiationBusy} onClick={recordNegotiationAndApprove}>{negotiationBusy ? 'Registrando...' : 'Registrar negociação e aprovar'}</Button>
     </Modal>
-    <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onRole={saveRole} canManageRole={user.perfil === 1 && clientProfile?.idUsuario !== user.idUsuario} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
+    <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onRole={saveRole} canManageRole={user.perfil === 1 && clientProfile?.idUsuario !== user.idUsuario} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canManageStatus={user.perfil === 1 || user.perfil === 5} currentUserId={user.idUsuario} onStatus={updateClientAccess} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
     <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError(''); setRegistrationPhoneSubmitAttempted(false); setRegistrationFieldsTouched({}) } }} title="Criar cadastro para uma organização">
       <form className="form-stack" noValidate onSubmit={createRegistration}>
         <p className="access-intro">Cadastre a organização e uma pessoa responsável. A pessoa entrará usando e-mail e senha.</p>

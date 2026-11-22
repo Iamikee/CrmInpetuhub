@@ -117,6 +117,29 @@ class SmtpEmailSenderTest {
     }
 
     @Test
+    void sendsPromotionCodeToCallerWithTargetNameAndRejectsInvalidCode() {
+        MockClient client = mockClient();
+        client.server().expect(requestTo(API_URL))
+            .andExpect(method(POST))
+            .andExpect(jsonPath("$.to[0].email").value("dev@example.test"))
+            .andExpect(jsonPath("$.textContent", containsString(
+                "Use o código 482917 para confirmar a promoção de Ana Exemplo para Desenvolvedor / Admin. "
+                    + "O código expira em 10 minutos. Se você não iniciou esta ação, ignore este e-mail.")))
+            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        SmtpEmailSender sender = new SmtpEmailSender(
+            client.restClient(), new EmailTemplateRenderer(), true, "https://connect.example.test",
+            API_KEY, MAIL_FROM, MAIL_REPLY_TO);
+
+        sender.sendProfilePromotionCode("dev@example.test", "Dev Exemplo", "482917", 10, "Ana Exemplo");
+
+        IllegalArgumentException invalid = assertThrows(IllegalArgumentException.class,
+            () -> sender.sendProfilePromotionCode(
+                "dev@example.test", "Dev Exemplo", "48291", 10, "Ana Exemplo"));
+        assertEquals("O código da promoção deve conter seis dígitos.", invalid.getMessage());
+        client.server().verify();
+    }
+
+    @Test
     void refusesToSendWhenPublicUrlIsEmpty() {
         MockClient client = mockClient();
         SmtpEmailSender sender = new SmtpEmailSender(
