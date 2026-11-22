@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown, Filter, Mail, MapPin, MessageCircle, Plus, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Filter, Mail, MapPin, MessageCircle, Plus, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Avatar, Button, Logo, Modal, PasswordInput, PasswordRecoveryForm, PhoneInput, Title, calendarDaysUntil, formatBrazilianPhone, hasPhoneInput, isValidPhoneNumber, localDateValue, maskEmail, normalizePhoneToE164, request, reservationStatusClass, reservationStatusLabel, storeUser, uploadQuestion } from './App.jsx'
 import { CountUp, Reveal, Stagger, StaggerItem } from './motion/index.js'
 import { normalizeEmail, normalizeFullName, sanitizeNameInput, validateEmail, validateIdentityFields } from './validators.js'
+import { getIsoDayOfWeek } from './openingHours.js'
 
 export function AccessPage({ onLogin, onSignup }) {
   const [email, setEmail] = useState('')
@@ -296,13 +297,27 @@ export function EmailConfirmationPage() {
   </main>
 }
 
-export function ReservationsPage({ items, onCancel }) {
+export function ReservationsPage({ items, onCancel, onBack, onRefresh, reservationsLoaded = true }) {
   const [selected, setSelected] = useState(null)
   const [reason, setReason] = useState('')
   const [filter, setFilter] = useState('Todas')
   const [cancelError, setCancelError] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
+  const [refreshBusy, setRefreshBusy] = useState(false)
+  const [refreshError, setRefreshError] = useState('')
   const list = items.filter(item => filter === 'Todas' || item.statusReserva === filter)
+  async function refresh() {
+    if (refreshBusy) return
+    setRefreshBusy(true)
+    setRefreshError('')
+    try {
+      if (await onRefresh() === false) setRefreshError('Não foi possível atualizar suas reservas. Tente novamente.')
+    } catch {
+      setRefreshError('Não foi possível atualizar suas reservas. Tente novamente.')
+    } finally {
+      setRefreshBusy(false)
+    }
+  }
   async function cancel() {
     if (!selected || !reason.trim() || cancelBusy) return
     setCancelBusy(true)
@@ -319,13 +334,57 @@ export function ReservationsPage({ items, onCancel }) {
       setCancelBusy(false)
     }
   }
-  return <main className="inner-page">
-    <div className="page-back"><ArrowLeft size={15} /> <span>PORTAL DO SOLICITANTE</span></div>
-    <div className="section-top"><div><Title as="h1">Minhas <em>reservas</em></Title><p>Acompanhe cada encontro planejado no InPETU Hub.</p></div><div className="compact-filter"><Filter size={15} /><select value={filter} onChange={e => setFilter(e.target.value)}><option>Todas</option><option value="Pendente">Pendente</option><option value="Confirmada">Aprovado</option><option value="Cancelada">Cancelada</option></select><ChevronDown size={14} /></div></div>
-    <div className="reservation-table-wrap"><table className="data-table"><thead><tr><th>Encontro</th><th>Espaço</th><th>Data e horário</th><th>Status</th><th>Ação</th></tr></thead><tbody>{list.map(item => {
-      const cancellationAllowed = calendarDaysUntil(item.dataReserva) >= 15
-      return <tr key={item.idReserva}><td><strong>{item.tituloEvento}</strong><small>Solicitação #{item.idReserva}</small></td><td>{item.espaco || 'Espaço InPETU'}</td><td>{item.dataReserva} · {item.horarioInicio}-{item.horarioFim}{item.quantidadeParticipantes ? <small>{item.quantidadeParticipantes} visitantes</small> : null}{item.telefoneContato && <small>Contato: {formatBrazilianPhone(item.telefoneContato)}</small>}</td><td><span className={`status-pill ${reservationStatusClass(item.statusReserva)}`}><i />{reservationStatusLabel(item.statusReserva)}</span></td><td>{item.statusReserva !== 'Cancelada' && (cancellationAllowed ? <button className="table-action" onClick={() => { setSelected(item); setCancelError('') }}>Cancelar</button> : <small>Menos de 15 dias: solicite exceção à equipe.</small>)}</td></tr>
-    })}</tbody></table>{list.length === 0 && <div className="empty-state"><CalendarDays size={25} /><p>Nenhuma reserva nesta categoria.</p></div>}</div>
+  return <main className="inner-page reservations-page">
+    <button type="button" className="reservations-back" aria-label="Voltar ao portal" onClick={onBack}><ArrowLeft size={16} aria-hidden="true" /><span>Voltar ao portal</span></button>
+    <section className="portal-upcoming reservations-panel" aria-labelledby="reservations-heading">
+      <div className="portal-section-heading reservations-heading">
+        <div><Title as="h1" id="reservations-heading">Minhas <em>reservas</em></Title><p>Acompanhe cada encontro planejado no InPETU Hub.</p></div>
+        <div className="reservations-controls">
+          <label className="reservations-filter-control">
+            <Filter size={16} aria-hidden="true" />
+            <select aria-label="Filtrar reservas" value={filter} onChange={event => setFilter(event.target.value)}>
+              <option>Todas</option><option value="Pendente">Pendente</option><option value="Confirmada">Aprovado</option><option value="Cancelada">Cancelada</option>
+            </select>
+          </label>
+          <button type="button" className="reservations-refresh" onClick={refresh} disabled={!reservationsLoaded || refreshBusy}>
+            <RefreshCw size={16} aria-hidden="true" />{refreshBusy ? 'Atualizando...' : 'Atualizar'}
+          </button>
+        </div>
+      </div>
+      {refreshError && <p className="reservations-refresh-error" role="alert">{refreshError}</p>}
+      {!reservationsLoaded
+        ? <p className="portal-empty" role="status">Carregando suas reservas...</p>
+        : list.length === 0
+          ? <div className="reservations-empty"><CalendarDays size={28} aria-hidden="true" /><p>Nenhuma reserva nesta categoria.</p></div>
+          : <div className="portal-upcoming-list reservations-list">{list.map(item => {
+            const daysUntil = calendarDaysUntil(item.dataReserva)
+            const isCancelled = item.statusReserva === 'Cancelada'
+            const cancellationAllowed = !isCancelled && daysUntil >= 15
+            const showCancellationNotice = !isCancelled && daysUntil >= 0 && daysUntil < 15
+            const date = new Date(`${item.dataReserva}T12:00:00`)
+            const formattedDate = date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+            const formattedTime = `${String(item.horarioInicio || '').slice(0, 5)} às ${String(item.horarioFim || '').slice(0, 5)}`
+            return <article className="portal-reservation-card" key={item.idReserva}>
+              <div className="reservation-details">
+                <strong className="reservation-title">{item.tituloEvento}</strong>
+                <small className="reservation-number">Solicitação #{item.idReserva}</small>
+                <span className="reservation-space">{item.espaco || 'Espaço InPETU'}</span>
+                <time dateTime={`${item.dataReserva}T${String(item.horarioInicio || '').slice(0, 5)}`}>{formattedDate} · {formattedTime}</time>
+                {item.quantidadeParticipantes ? <span>{item.quantidadeParticipantes} visitantes</span> : null}
+                {item.telefoneContato && <span className="reservation-contact">Contato: {formatBrazilianPhone(item.telefoneContato)}</span>}
+              </div>
+              <div className="reservation-status-group">
+                <span className={`reservation-status ${reservationStatusClass(item.statusReserva)}`}><i aria-hidden="true" />{reservationStatusLabel(item.statusReserva)}</span>
+                {item.statusReserva === 'Pendente' && getIsoDayOfWeek(item.dataReserva) === 7 && <small className="reservation-sunday-note">Pedido de domingo aguardando aprovação da equipe.</small>}
+              </div>
+              {(cancellationAllowed || showCancellationNotice) && <div className="reservation-action-row">
+                {cancellationAllowed
+                  ? <button type="button" className="table-action" onClick={() => { setSelected(item); setCancelError('') }}>Cancelar</button>
+                  : <small>Menos de 15 dias: solicite exceção à equipe.</small>}
+              </div>}
+            </article>
+          })}</div>}
+    </section>
     <Modal open={Boolean(selected)} close={() => { if (!cancelBusy) { setSelected(null); setCancelError('') } }} title="Cancelar solicitação">
       <div className="cancel-summary"><span>RESERVA #{selected?.idReserva}</span><strong>{selected?.tituloEvento}</strong><small>{selected?.dataReserva} · {selected?.horarioInicio}-{selected?.horarioFim}</small></div>
       <label className="reason-field">Motivo do cancelamento<textarea rows="4" required placeholder="Conte por que está cancelando esta reserva" value={reason} onChange={e => setReason(e.target.value)} /></label>

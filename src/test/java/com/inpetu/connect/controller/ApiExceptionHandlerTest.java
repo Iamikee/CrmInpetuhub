@@ -35,6 +35,22 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
+    void preservesWeeklyOpeningHourMessagesAsBadRequest() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/v1/reservas");
+        for (String message : new String[] {
+                "O espaço não funciona aos domingos.",
+                "O horário deve ficar entre 08:00 e 22:00."
+        }) {
+            var response = handler.handleResponseStatusException(
+                    new ResponseStatusException(HttpStatus.BAD_REQUEST, message), request);
+
+            assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+            assertEquals(message, response.getBody().message());
+        }
+    }
+
+    @Test
     void returnsHelpfulFieldValidationMessageWithBadRequestStatus() throws NoSuchMethodException {
         var bindingResult = new BeanPropertyBindingResult(new Object(), "cadastro");
         bindingResult.addError(new FieldError("cadastro", "telefone", null,

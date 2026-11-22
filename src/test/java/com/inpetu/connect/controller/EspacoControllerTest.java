@@ -9,6 +9,7 @@ import com.inpetu.connect.repository.EspacoFotoRepository;
 import com.inpetu.connect.repository.LogAuditoriaRepository;
 import com.inpetu.connect.repository.ReservaRepository;
 import com.inpetu.connect.repository.UsuarioRepository;
+import com.inpetu.connect.service.HorarioFuncionamentoService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,13 +37,14 @@ class EspacoControllerTest {
     @Mock EspacoFotoRepository fotos;
     @Mock LogAuditoriaRepository auditoria;
     @Mock UsuarioRepository usuarios;
+    @Mock HorarioFuncionamentoService horarios;
     @Mock Authentication authentication;
     EspacoController controller;
     @TempDir Path tempDir;
 
     @BeforeEach
     void configurarController() {
-        controller = new EspacoController(espacos, reservas, fotos, auditoria, usuarios, tempDir.toString());
+        controller = new EspacoController(espacos, reservas, fotos, auditoria, usuarios, horarios, tempDir.toString());
     }
 
     @Test

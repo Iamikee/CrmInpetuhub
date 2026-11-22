@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Users } from 'lucide-react'
 import { Button, RoomPhoto, Title, addMinutesToTime, isGuidedTour, localDateValue, request, saoPauloDateTime } from './App.jsx'
+import { formatWeeklyHours, getApprovalMessage, getClosedDayMessage, getHoursForDate, getTimeSlots, validateOperatingHours } from './openingHours.js'
 
 export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialDate, initialKind, initialSpaceId, availabilityVersion }) {
   const [date, setDate] = useState(initialDate)
@@ -10,6 +11,9 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
   const [availabilityLoading, setAvailabilityLoading] = useState(false)
   const [availabilityError, setAvailabilityError] = useState('')
   const [availabilityReload, setAvailabilityReload] = useState(0)
+  const [operatingHours, setOperatingHours] = useState([])
+  const [operatingHoursLoading, setOperatingHoursLoading] = useState(false)
+  const [operatingHoursError, setOperatingHoursError] = useState('')
   const typeOrder = ['Auditório', 'Sala de aula', 'Coworking', 'Sala de reunião', 'Visita guiada']
   const orderedSpaces = [...spaces].sort((left, right) => {
     const leftIndex = typeOrder.indexOf(left.tipoEspaco)
@@ -64,6 +68,23 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
       .finally(() => { if (active) setAvailabilityLoading(false) })
     return () => { active = false }
   }, [selectedSpace?.idEspaco, selectedSpace?.ativo, date, availabilityReload, availabilityVersion])
+  useEffect(() => {
+    if (!selectedSpace) {
+      setOperatingHours([])
+      setOperatingHoursLoading(false)
+      setOperatingHoursError('')
+      return
+    }
+    let active = true
+    setOperatingHours([])
+    setOperatingHoursLoading(true)
+    setOperatingHoursError('')
+    request(`/espacos/${selectedSpace.idEspaco}/horarios-funcionamento`)
+      .then(data => { if (active) setOperatingHours(data) })
+      .catch(error => { if (active) setOperatingHoursError(error.message) })
+      .finally(() => { if (active) setOperatingHoursLoading(false) })
+    return () => { active = false }
+  }, [selectedSpace?.idEspaco])
   const selectedDay = new Date(`${date}T12:00:00`)
   const today = new Date(`${saoPauloNow.date}T12:00:00`)
   today.setHours(12, 0, 0, 0)
@@ -72,10 +93,10 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
     day.setDate(today.getDate() + index)
     return day
   })
-  const slots = Array.from({ length: 28 }, (_, index) => {
-    const totalMinutes = 8 * 60 + index * 30
-    return `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`
-  })
+  const selectedOperatingHours = getHoursForDate(operatingHours, date)
+  const selectedDateClosed = selectedOperatingHours?.fechado === true
+  const selectedDateApproval = getApprovalMessage(operatingHours, date)
+  const slots = getTimeSlots(operatingHours, date)
   const monthStart = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1, 12)
   const monthDays = Array.from({ length: new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0).getDate() }, (_, index) => {
     const day = new Date(monthStart)
@@ -87,7 +108,7 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
     { label: 'Manhã', times: slots.filter(time => time < '12:00') },
     { label: 'Tarde', times: slots.filter(time => time >= '12:00' && time < '18:00') },
     { label: 'Noite', times: slots.filter(time => time >= '18:00') },
-  ]
+  ].filter(group => group.times.length > 0)
   function reservationAt(time) {
     const end = addMinutesToTime(time, 30)
     return availability.find(reservation => {
@@ -97,13 +118,14 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
     })
   }
   function isRangeAvailable(start, end) {
-    if (!start || !end || end <= start || start < '08:00' || end > '22:00') return false
+    if (!start || !end || end <= start || validateOperatingHours(operatingHours, date, start, end)) return false
     for (let cursor = start; cursor < end; cursor = addMinutesToTime(cursor, 30)) {
       if (reservationAt(cursor)) return false
     }
     return true
   }
-  const canRequestReservation = Boolean(selectedSpace) && date >= saoPauloNow.date && !availabilityLoading && !availabilityError &&
+  const canRequestReservation = Boolean(selectedSpace) && operatingHours.length > 0 && !operatingHoursLoading && !operatingHoursError &&
+    date >= saoPauloNow.date && !availabilityLoading && !availabilityError &&
     isRangeAvailable(startTime, endTime)
   const reservationRequestHint = unavailableSpace
     ? `Indisponível: ${unavailableSpace.motivoIndisponibilidade || 'Este espaço está temporariamente indisponível.'}`
@@ -111,10 +133,16 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
       ? 'Aguarde a consulta dos horários.'
       : availabilityError
         ? 'Não é possível solicitar a reserva até a disponibilidade ser validada.'
+        : operatingHoursLoading
+          ? 'Aguarde a consulta do horário de funcionamento.'
+          : operatingHoursError
+            ? 'Não é possível solicitar a reserva até o funcionamento ser validado.'
         : !selectedSpace
           ? 'Escolha um espaço para continuar.'
           : date < saoPauloNow.date
             ? 'Escolha uma data de hoje em diante.'
+            : selectedDateClosed
+              ? getClosedDayMessage(date)
             : !startTime
               ? 'Escolha um horário de início.'
               : !endTime
@@ -163,8 +191,11 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
     const value = localDateValue(day)
     const isSelected = value === date
     const isToday = value === saoPauloNow.date
-    return <button key={value} type="button" disabled={value < saoPauloNow.date} className="calendar-date-option" onClick={() => selectDate(day)} aria-current={isToday ? 'date' : undefined} aria-pressed={isSelected}>
-      {day.getDate()}
+    const closed = getHoursForDate(operatingHours, value)?.fechado === true
+    const approvalRequired = getHoursForDate(operatingHours, value)?.exigeAprovacao === true
+    const dayLabel = day.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
+    return <button key={value} type="button" disabled={value < saoPauloNow.date || operatingHoursLoading || !operatingHours.length || closed || Boolean(operatingHoursError)} className={`calendar-date-option ${closed ? 'calendar-date-closed' : ''}`} onClick={() => selectDate(day)} aria-label={`${dayLabel}${closed ? ', Fechado' : approvalRequired ? ', somente com aprovação da equipe' : ''}`} aria-current={isToday ? 'date' : undefined} aria-pressed={isSelected}>
+      <span>{day.getDate()}</span>{closed && <small>Fechado</small>}{approvalRequired && <span className="calendar-date-approval-dot" role="img" aria-label="Domingo, depende de aprovação da equipe" />}
     </button>
   }
   return <main className="inner-page catalog-page booking-page">
@@ -207,8 +238,11 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
               const value = localDateValue(day)
               const selected = date === value
               const isToday = value === localDateValue()
-              return <button key={value} type="button" className={`booking-date-card ${selected ? 'booking-date-selected' : ''}`} onClick={() => selectDate(day)} aria-pressed={selected} aria-current={isToday ? 'date' : undefined}>
-                <span>{isToday ? 'Hoje' : day.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</span><strong>{day.getDate()}</strong><small>{day.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</small>
+              const closed = getHoursForDate(operatingHours, value)?.fechado === true
+              const approvalRequired = getHoursForDate(operatingHours, value)?.exigeAprovacao === true
+              const weekday = day.toLocaleDateString('pt-BR', { weekday: 'long' })
+              return <button key={value} type="button" className={`booking-date-card ${selected ? 'booking-date-selected' : ''} ${closed ? 'booking-date-closed' : ''}`} disabled={operatingHoursLoading || !operatingHours.length || closed || Boolean(operatingHoursError)} onClick={() => selectDate(day)} aria-label={`${weekday}, ${day.getDate()} ${day.toLocaleDateString('pt-BR', { month: 'long' })}${closed ? ', Fechado' : approvalRequired ? ', somente com aprovação da equipe' : ''}`} aria-pressed={selected} aria-current={isToday ? 'date' : undefined}>
+                <span>{isToday ? 'Hoje' : day.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</span><strong>{day.getDate()}</strong><small>{day.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</small>{closed && <small className="booking-date-closed-label">Fechado</small>}{approvalRequired && <span className="booking-date-approval-dot" role="img" aria-label="Domingo, depende de aprovação da equipe" />}
               </button>
             })}
           </div>
@@ -220,7 +254,8 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
           </div>}
           <div className="booking-legend" aria-label="Legenda de disponibilidade"><span><i className="booking-legend-free" /> Livre</span><span><i className="booking-legend-busy" /> Ocupado</span><span><i className="booking-legend-pending" /> Em análise</span></div>
           {guidedTour && <p className="booking-guided-note" role="note">Visitas guiadas exigem análise da equipe. O horário solicitado fica reservado enquanto aguarda a avaliação.</p>}
-          {!selectedSpace ? <p className="booking-state">{unavailableSpace ? `${unavailableSpace.nomeEspaco}: ${unavailableSpace.motivoIndisponibilidade || 'Este espaço está temporariamente indisponível.'}` : 'Escolha um espaço para consultar os horários.'}</p> : availabilityLoading ? <p className="booking-state" role="status">Consultando disponibilidade...</p> : availabilityError ? <div className="booking-error" role="alert"><span>Não foi possível consultar a disponibilidade: {availabilityError}</span><button type="button" onClick={() => setAvailabilityReload(value => value + 1)}>Tentar novamente</button></div> : <div className="booking-time-groups">
+          {selectedDateApproval && <p className="booking-guided-note" role="note">{selectedDateApproval}</p>}
+          {!selectedSpace ? <p className="booking-state">{unavailableSpace ? `${unavailableSpace.nomeEspaco}: ${unavailableSpace.motivoIndisponibilidade || 'Este espaço está temporariamente indisponível.'}` : 'Escolha um espaço para consultar os horários.'}</p> : operatingHoursLoading ? <p className="booking-state" role="status">Consultando o funcionamento...</p> : operatingHoursError ? <p className="booking-state" role="alert">Não foi possível consultar o funcionamento: {operatingHoursError}</p> : selectedDateClosed ? <p className="booking-state" role="status">{getClosedDayMessage(date)}</p> : availabilityLoading ? <p className="booking-state" role="status">Consultando disponibilidade...</p> : availabilityError ? <div className="booking-error" role="alert"><span>Não foi possível consultar a disponibilidade: {availabilityError}</span><button type="button" onClick={() => setAvailabilityReload(value => value + 1)}>Tentar novamente</button></div> : <div className="booking-time-groups">
             <p className="catalog-time-help">Clique no primeiro e no último horário que você quer reservar.</p>
             {slotGroups.map(group => <section className="booking-time-group" key={group.label} aria-label={group.label}>
               <Title as="h3">{group.label}</Title><div className="booking-time-grid">{group.times.map(time => {
@@ -242,8 +277,8 @@ export default function CalendarPage({ spaces, spacesLoaded, onReserve, initialD
               })}</div>
             </section>)}
           </div>}
-          {startTime && endTime > startTime && !availabilityLoading && !availabilityError && !isRangeAvailable(startTime, endTime) && <p className="booking-validation-error" role="alert">O período escolhido inclui um horário ocupado ou em análise.</p>}
-          <p className="booking-hours-note">Funcionamento: 08h-22h. Horários ocupados ou em análise não podem ser reservados.</p>
+          {startTime && endTime > startTime && !availabilityLoading && !availabilityError && !isRangeAvailable(startTime, endTime) && <p className="booking-validation-error" role="alert">{validateOperatingHours(operatingHours, date, startTime, endTime) || 'O período escolhido inclui um horário ocupado ou em análise.'}</p>}
+          <p className="booking-hours-note">Funcionamento semanal: {formatWeeklyHours(operatingHours) || (operatingHoursError ? 'Indisponível' : 'Carregando...')}. Horários ocupados ou em análise não podem ser reservados.</p>
         </section>
       </div>
 
