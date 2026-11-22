@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Filter, Mail, MapPin, MessageCircle, Plus, RefreshCw, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Mail, MapPin, MessageCircle, Plus, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Avatar, Button, Logo, Modal, PasswordInput, PasswordRecoveryForm, PhoneInput, Title, calendarDaysUntil, formatBrazilianPhone, hasPhoneInput, isValidPhoneNumber, localDateValue, maskEmail, normalizePhoneToE164, request, reservationStatusClass, reservationStatusLabel, storeUser, uploadQuestion } from './App.jsx'
 import { CountUp, Reveal, Stagger, StaggerItem } from './motion/index.js'
 import { normalizeEmail, normalizeFullName, sanitizeNameInput, validateEmail, validateIdentityFields } from './validators.js'
 import { getIsoDayOfWeek } from './openingHours.js'
+import { filterReservations } from './reservationFilters.js'
 
 export function AccessPage({ onLogin, onSignup }) {
   const [email, setEmail] = useState('')
@@ -297,15 +298,49 @@ export function EmailConfirmationPage() {
   </main>
 }
 
-export function ReservationsPage({ items, onCancel, onBack, onRefresh, reservationsLoaded = true }) {
+export function ReservationsPage({ items, spaces = [], onCancel, onBack, onRefresh, reservationsLoaded = true }) {
   const [selected, setSelected] = useState(null)
   const [reason, setReason] = useState('')
   const [filter, setFilter] = useState('Todas')
+  const [searchText, setSearchText] = useState('')
+  const [debouncedSearchText, setDebouncedSearchText] = useState('')
+  const [campoData, setCampoData] = useState('dataReserva')
+  const [de, setDe] = useState('')
+  const [ate, setAte] = useState('')
+  const [dateRangeTouched, setDateRangeTouched] = useState(false)
   const [cancelError, setCancelError] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
   const [refreshBusy, setRefreshBusy] = useState(false)
   const [refreshError, setRefreshError] = useState('')
-  const list = items.filter(item => filter === 'Todas' || item.statusReserva === filter)
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearchText(searchText), 200)
+    return () => window.clearTimeout(timeout)
+  }, [searchText])
+  const dateRangeInvalid = Boolean(de && ate && ate < de)
+  const hasActiveFilters = Boolean(searchText.trim() || filter !== 'Todas' || de || ate)
+  const searchableItems = items.map(item => ({
+    ...item,
+    espaco: item.espaco || spaces.find(space => Number(space.idEspaco) === Number(item.idEspaco))?.nomeEspaco,
+  }))
+  const list = filterReservations(searchableItems, {
+    texto: debouncedSearchText,
+    campoData,
+    de,
+    ate,
+    status: filter,
+  })
+  function clearFilters() {
+    setFilter('Todas')
+    setSearchText('')
+    setDebouncedSearchText('')
+    setCampoData('dataReserva')
+    setDe('')
+    setAte('')
+    setDateRangeTouched(false)
+  }
+  function clearFiltersButton() {
+    return <button type="button" className="reservations-clear-filters" onClick={clearFilters}>Limpar filtros</button>
+  }
   async function refresh() {
     if (refreshBusy) return
     setRefreshBusy(true)
@@ -341,22 +376,69 @@ export function ReservationsPage({ items, onCancel, onBack, onRefresh, reservati
         <div><Title as="h1" id="reservations-heading">Minhas <em>reservas</em></Title><p>Acompanhe cada encontro planejado no InPETU Hub.</p></div>
         <div className="reservations-controls">
           <label className="reservations-filter-control">
-            <Filter size={16} aria-hidden="true" />
-            <select aria-label="Filtrar reservas" value={filter} onChange={event => setFilter(event.target.value)}>
+            <span>Status</span>
+            <select id="reservation-status" value={filter} onChange={event => setFilter(event.target.value)}>
               <option>Todas</option><option value="Pendente">Pendente</option><option value="Confirmada">Aprovado</option><option value="Cancelada">Cancelada</option>
             </select>
           </label>
           <button type="button" className="reservations-refresh" onClick={refresh} disabled={!reservationsLoaded || refreshBusy}>
             <RefreshCw size={16} aria-hidden="true" />{refreshBusy ? 'Atualizando...' : 'Atualizar'}
           </button>
+          {hasActiveFilters && list.length > 0 && clearFiltersButton()}
         </div>
       </div>
+      <div className="reservations-filter-grid">
+        <label className="reservations-filter-field" htmlFor="reservation-search">
+          <span>Buscar por nome, espaço ou solicitação</span>
+          <input
+            id="reservation-search"
+            type="search"
+            value={searchText}
+            onChange={event => setSearchText(event.target.value)}
+            placeholder="Ex.: oficina, sala ou #80"
+          />
+        </label>
+        <label className="reservations-filter-field" htmlFor="reservation-date-field">
+          <span>Filtrar por</span>
+          <select id="reservation-date-field" value={campoData} onChange={event => setCampoData(event.target.value)}>
+            <option value="dataReserva">Data do encontro</option>
+            <option value="solicitacao">Solicitada em</option>
+          </select>
+        </label>
+        <label className="reservations-filter-field" htmlFor="reservation-date-from">
+          <span>De</span>
+          <input
+            id="reservation-date-from"
+            type="date"
+            value={de}
+            aria-invalid={dateRangeTouched && dateRangeInvalid}
+            aria-describedby={dateRangeTouched && dateRangeInvalid ? 'reservation-date-error' : undefined}
+            onChange={event => setDe(event.target.value)}
+            onBlur={() => setDateRangeTouched(true)}
+          />
+        </label>
+        <label className="reservations-filter-field" htmlFor="reservation-date-to">
+          <span>Até</span>
+          <input
+            id="reservation-date-to"
+            type="date"
+            value={ate}
+            aria-invalid={dateRangeTouched && dateRangeInvalid}
+            aria-describedby={dateRangeTouched && dateRangeInvalid ? 'reservation-date-error' : undefined}
+            onChange={event => setAte(event.target.value)}
+            onBlur={() => setDateRangeTouched(true)}
+          />
+        </label>
+      </div>
+      {dateRangeTouched && dateRangeInvalid && <p id="reservation-date-error" className="reservations-date-error" role="status">A data Até deve ser igual ou posterior à data De.</p>}
       {refreshError && <p className="reservations-refresh-error" role="alert">{refreshError}</p>}
       {!reservationsLoaded
         ? <p className="portal-empty" role="status">Carregando suas reservas...</p>
-        : list.length === 0
-          ? <div className="reservations-empty"><CalendarDays size={28} aria-hidden="true" /><p>Nenhuma reserva nesta categoria.</p></div>
-          : <div className="portal-upcoming-list reservations-list">{list.map(item => {
+        : <>
+          <p className="reservations-count" aria-live="polite" aria-atomic="true">{`Mostrando ${list.length} de ${items.length} reservas`}</p>
+          {list.length === 0
+            ? <div className="reservations-empty"><CalendarDays size={28} aria-hidden="true" /><p>Nenhuma reserva encontrada com esses filtros</p>{hasActiveFilters && clearFiltersButton()}</div>
+            : <div className="portal-upcoming-list reservations-list">{list.map(item => {
             const daysUntil = calendarDaysUntil(item.dataReserva)
             const isCancelled = item.statusReserva === 'Cancelada'
             const cancellationAllowed = !isCancelled && daysUntil >= 15
@@ -383,7 +465,8 @@ export function ReservationsPage({ items, onCancel, onBack, onRefresh, reservati
                   : <small>Menos de 15 dias: solicite exceção à equipe.</small>}
               </div>}
             </article>
-          })}</div>}
+            })}</div>}
+        </>}
     </section>
     <Modal open={Boolean(selected)} close={() => { if (!cancelBusy) { setSelected(null); setCancelError('') } }} title="Cancelar solicitação">
       <div className="cancel-summary"><span>RESERVA #{selected?.idReserva}</span><strong>{selected?.tituloEvento}</strong><small>{selected?.dataReserva} · {selected?.horarioInicio}-{selected?.horarioFim}</small></div>

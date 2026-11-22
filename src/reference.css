@@ -918,29 +918,70 @@ body .public-app .booking-legend > span {
 .reservations-controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-end;
+  gap: 8px;
 }
 .reservations-filter-control {
-  position: relative;
-  display: flex;
-  align-items: center;
+  display: grid;
+  gap: 6px;
   min-width: 170px;
 }
-.reservations-filter-control > svg {
-  position: absolute;
-  left: 12px;
-  color: var(--color-text-muted);
-  pointer-events: none;
+.reservations-filter-control > span,
+.reservations-filter-field > span {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
 }
 .reservations-filter-control select {
   width: 100%;
-  min-height: 42px;
-  padding: 8px 12px 8px 38px;
+  min-height: 44px;
+  padding: 8px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-surface);
   color: var(--color-text);
+  font-size: 14px;
+}
+.reservations-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 20px 0 14px;
+}
+.reservations-filter-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.reservations-filter-field input,
+.reservations-filter-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+}
+.reservations-filter-field input:focus-visible,
+.reservations-filter-field select:focus-visible,
+.reservations-filter-control select:focus-visible,
+.reservations-clear-filters:focus-visible {
+  outline: 2px solid var(--color-brand-accessible);
+  outline-offset: 2px;
+}
+.reservations-date-error {
+  margin: -6px 0 12px;
+  color: var(--color-danger);
+  font-size: 13px;
+}
+.reservations-count {
+  margin: 0 0 12px;
+  color: var(--color-text-muted);
   font-size: 14px;
 }
 .reservations-refresh {
@@ -948,8 +989,19 @@ body .public-app .booking-legend > span {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 42px;
+  min-height: 44px;
   padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-brand-accessible);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.reservations-clear-filters {
+  min-height: 44px;
+  padding: 8px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-surface);
@@ -1898,9 +1950,10 @@ body .public-app .booking-legend > span {
   .portal-upcoming-list article{align-items:flex-start;flex-wrap:wrap}
   .portal-upcoming-list .status-pill{margin-left:62px}
   .reservations-heading{gap:14px}
-  .reservations-controls{width:100%}
-  .reservations-filter-control{flex:1;min-width:0}
-  .reservations-refresh{flex:0 0 auto}
+  .reservations-controls{display:grid;width:100%;grid-template-columns:minmax(0,1fr)}
+  .reservations-filter-control{min-width:0}
+  .reservations-filter-grid{grid-template-columns:minmax(0,1fr)}
+  .reservations-refresh,.reservations-clear-filters{width:100%}
   .public-app .portal-upcoming-list .portal-reservation-card{grid-template-columns:minmax(0,1fr);grid-template-areas:"details" "status" "action";gap:12px;padding:14px}
   .reservation-action-row .table-action{width:100%}
   .profile-editor{grid-template-columns:1fr;gap:18px}
