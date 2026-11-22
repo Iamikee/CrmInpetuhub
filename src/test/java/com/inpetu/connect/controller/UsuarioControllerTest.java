@@ -17,6 +17,9 @@ import com.inpetu.connect.repository.DuvidaAtendimentoRepository;
 import com.inpetu.connect.service.EmailSender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -515,18 +518,17 @@ class UsuarioControllerTest {
         verifyNoInteractions(auditoria);
     }
 
-    @Test
-    void redefineSenhaTemporariaApenasParaOutroUsuarioEAuditaSemSegredo() {
-        Usuario admin = new Usuario();
-        admin.setIdUsuario(1);
-        admin.setIdPerfil(1);
-        admin.setEmail("admin@example.org");
+    @ParameterizedTest
+    @CsvSource({"1,2", "1,3", "1,4", "5,1", "5,2", "5,3", "5,4"})
+    void redefineSenhaTemporariaParaPerfilDeMenorAutoridade(int perfilResponsavel, int perfilAlvo) {
+        Usuario responsavel = new Usuario();
+        responsavel.setIdUsuario(1);
+        responsavel.setIdPerfil(perfilResponsavel);
+        responsavel.setEmail("responsavel@example.org");
         Usuario alvo = new Usuario();
         alvo.setIdUsuario(27);
-        alvo.setIdPerfil(4);
-        when(authentication.getName()).thenReturn("admin@example.org");
-        when(usuarios.findByEmailIgnoreCase("admin@example.org")).thenReturn(Optional.of(admin));
-        when(usuarios.findById(27)).thenReturn(Optional.of(alvo));
+        alvo.setIdPerfil(perfilAlvo);
+        prepararUsuariosRedefinicao(responsavel, alvo);
         when(auditoria.countRecentPasswordResets(eq(1), any())).thenReturn(0L);
         when(passwordEncoder.encode(anyString())).thenReturn("bcrypt-hash");
 
@@ -545,14 +547,36 @@ class UsuarioControllerTest {
         assertFalse(log.getValue().getDetalhesAlteracao().contains(temporaryPassword));
     }
 
-    @Test
-    void bloqueiaRedefinicaoDeSenhaDoProprioAdministrador() {
-        Usuario admin = new Usuario();
-        admin.setIdUsuario(1);
-        admin.setIdPerfil(1);
-        when(authentication.getName()).thenReturn("admin@example.org");
-        when(usuarios.findByEmailIgnoreCase("admin@example.org")).thenReturn(Optional.of(admin));
-        when(usuarios.findById(1)).thenReturn(Optional.of(admin));
+    @ParameterizedTest
+    @CsvSource({"1,5", "2,1"})
+    void bloqueiaRedefinicaoDeSenhaDePerfilComMaiorAutoridade(
+            int perfilResponsavel, int perfilAlvo) {
+        Usuario responsavel = new Usuario();
+        responsavel.setIdUsuario(1);
+        responsavel.setIdPerfil(perfilResponsavel);
+        responsavel.setEmail("responsavel@example.org");
+        Usuario alvo = new Usuario();
+        alvo.setIdUsuario(27);
+        alvo.setIdPerfil(perfilAlvo);
+        prepararUsuariosRedefinicao(responsavel, alvo);
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class, () ->
+                controller.redefinirSenha(27,
+                        new com.inpetu.connect.dto.RedefinirSenhaRequest(true, null), authentication));
+
+        assertEquals(HttpStatus.FORBIDDEN, error.getStatusCode());
+        verify(passwordEncoder, never()).encode(anyString());
+        verifyNoInteractions(auditoria);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 3, 4, 5})
+    void bloqueiaRedefinicaoDeSenhaDaPropriaContaEmTodosOsPerfis(int perfil) {
+        Usuario proprioUsuario = new Usuario();
+        proprioUsuario.setIdUsuario(1);
+        proprioUsuario.setIdPerfil(perfil);
+        proprioUsuario.setEmail("responsavel@example.org");
+        prepararUsuariosRedefinicao(proprioUsuario, proprioUsuario);
 
         ResponseStatusException error = assertThrows(ResponseStatusException.class, () ->
                 controller.redefinirSenha(1,
@@ -561,6 +585,12 @@ class UsuarioControllerTest {
         assertEquals(HttpStatus.FORBIDDEN, error.getStatusCode());
         verify(passwordEncoder, never()).encode(anyString());
         verifyNoInteractions(auditoria);
+    }
+
+    private void prepararUsuariosRedefinicao(Usuario responsavel, Usuario alvo) {
+        when(authentication.getName()).thenReturn(responsavel.getEmail());
+        when(usuarios.findByEmailIgnoreCase(responsavel.getEmail())).thenReturn(Optional.of(responsavel));
+        when(usuarios.findById(alvo.getIdUsuario())).thenReturn(Optional.of(alvo));
     }
 
     @Test
