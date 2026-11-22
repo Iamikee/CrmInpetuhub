@@ -128,7 +128,9 @@ public class DemoDataSeed {
                     new IllegalStateException("Espaço seed não encontrado: " + dados.tipoEspaco()));
                 Reserva reserva = new Reserva();
                 LocalDate dataReserva = LocalDate.now(ZoneId.of("America/Sao_Paulo")).plusDays(dados.dias());
-                String statusReserva = dataReserva.getDayOfWeek() == DayOfWeek.SUNDAY ? "Pendente" : dados.status();
+                DayOfWeek diaReserva = dataReserva.getDayOfWeek();
+                boolean fimDeSemana = diaReserva == DayOfWeek.SATURDAY || diaReserva == DayOfWeek.SUNDAY;
+                String statusReserva = fimDeSemana ? "Pendente" : dados.status();
                 reserva.setTituloEvento(dados.titulo());
                 reserva.setDescricaoFinalidade(dados.descricao());
                 reserva.setDataReserva(dataReserva);

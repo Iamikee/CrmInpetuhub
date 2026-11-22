@@ -7,10 +7,10 @@ INSERT IGNORE INTO organizacao (id_organizacao, nome_organizacao, tipo_organizac
 INSERT IGNORE INTO horario_funcionamento
     (dia_semana, horario_abertura, horario_fechamento, fechado, exige_aprovacao)
 VALUES
-    (1, '08:00:00', '22:00:00', false, false),
-    (2, '08:00:00', '22:00:00', false, false),
-    (3, '08:00:00', '22:00:00', false, false),
-    (4, '08:00:00', '22:00:00', false, false),
-    (5, '08:00:00', '22:00:00', false, false),
-    (6, '08:00:00', '22:00:00', false, false),
-    (7, '08:00:00', '22:00:00', false, true);
+    (1, '07:00:00', '21:00:00', false, false),
+    (2, '07:00:00', '21:00:00', false, false),
+    (3, '07:00:00', '21:00:00', false, false),
+    (4, '07:00:00', '21:00:00', false, false),
+    (5, '07:00:00', '21:00:00', false, false),
+    (6, '07:00:00', '21:00:00', false, true),
+    (7, '07:00:00', '21:00:00', false, true);

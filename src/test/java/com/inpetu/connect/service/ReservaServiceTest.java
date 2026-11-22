@@ -105,7 +105,7 @@ class ReservaServiceTest {
         responsavel.setAtivo(true);
         when(usuarios.findByEmail("equipe@inpetu.ufsc.br")).thenReturn(Optional.of(responsavel));
         when(espacos.bloquearParaReserva(2)).thenReturn(Optional.of(espaco));
-        doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "O horário deve ficar entre 08:00 e 22:00."))
+        doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "O horário deve ficar entre 07:00 e 21:00."))
                 .when(horarios).validarReserva(eq(espaco), any(LocalDate.class), any(LocalTime.class), any(LocalTime.class));
         LocalDate monday = LocalDate.now(ZoneId.of("America/Sao_Paulo"))
                 .with(TemporalAdjusters.next(DayOfWeek.MONDAY));
@@ -116,7 +116,7 @@ class ReservaServiceTest {
                 () -> service.editar(14, request, "equipe@inpetu.ufsc.br"));
 
         assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
-        assertEquals("O horário deve ficar entre 08:00 e 22:00.", error.getReason());
+        assertEquals("O horário deve ficar entre 07:00 e 21:00.", error.getReason());
         verify(reservas, never()).save(any());
     }
 
@@ -261,20 +261,25 @@ class ReservaServiceTest {
 
     @Test
     void coordenadorRecebeReservaDeDomingoPendenteMesmoSemSinalDeAprovacaoSemanal() {
-        assertReservaDominicalPendenteParaPerfil(1);
+        assertReservaDeFimDeSemanaPendenteParaPerfil(1, DayOfWeek.SUNDAY);
+    }
+
+    @Test
+    void coordenadorRecebeReservaDeSabadoPendenteMesmoSemSinalDeAprovacaoSemanal() {
+        assertReservaDeFimDeSemanaPendenteParaPerfil(1, DayOfWeek.SATURDAY);
     }
 
     @Test
     void gestorDeEspacosRecebeReservaDeDomingoPendenteMesmoSemSinalDeAprovacaoSemanal() {
-        assertReservaDominicalPendenteParaPerfil(2);
+        assertReservaDeFimDeSemanaPendenteParaPerfil(2, DayOfWeek.SUNDAY);
     }
 
     @Test
     void staffRecebeReservaDeDomingoPendenteMesmoSemSinalDeAprovacaoSemanal() {
-        assertReservaDominicalPendenteParaPerfil(3);
+        assertReservaDeFimDeSemanaPendenteParaPerfil(3, DayOfWeek.SUNDAY);
     }
 
-    private void assertReservaDominicalPendenteParaPerfil(int perfil) {
+    private void assertReservaDeFimDeSemanaPendenteParaPerfil(int perfil, DayOfWeek diaDaSemana) {
         Espaco espaco = new Espaco();
         espaco.setIdEspaco(2);
         espaco.setAtivo(true);
@@ -284,31 +289,32 @@ class ReservaServiceTest {
         usuario.setAtivo(true);
         usuario.setIdPerfil(perfil);
         usuario.setIdPersona(1);
-        LocalDate sunday = LocalDate.now(ZoneId.of("America/Sao_Paulo"))
-                .with(TemporalAdjusters.next(DayOfWeek.SUNDAY));
+        LocalDate dataFimDeSemana = LocalDate.now(ZoneId.of("America/Sao_Paulo"))
+                .with(TemporalAdjusters.next(diaDaSemana));
         when(espacos.bloquearParaReserva(2)).thenReturn(Optional.of(espaco));
-        when(horarios.validarReserva(eq(espaco), eq(sunday), any(LocalTime.class), any(LocalTime.class)))
+        when(horarios.validarReserva(eq(espaco), eq(dataFimDeSemana), any(LocalTime.class), any(LocalTime.class)))
                 .thenReturn(false);
         when(usuarios.findByEmail("visitante@exemplo.com")).thenReturn(Optional.of(usuario));
         when(usuarios.bloquearParaCota(7)).thenReturn(Optional.of(usuario));
-        when(reservas.existeConflito(eq(2), eq(sunday), any(LocalTime.class), any(LocalTime.class)))
+        when(reservas.existeConflito(eq(2), eq(dataFimDeSemana), any(LocalTime.class), any(LocalTime.class)))
                 .thenReturn(false);
         when(usuarios.findAllByAtivoTrueAndIdPerfilLessThan(4)).thenReturn(List.of());
         when(reservas.save(any(Reserva.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        ReservaRequest request = new ReservaRequest("Oficina", "Encontro de teste", sunday,
+        ReservaRequest request = new ReservaRequest("Oficina", "Encontro de teste", dataFimDeSemana,
                 LocalTime.of(10, 0), LocalTime.of(11, 0), 2, null);
 
         Reserva reserva = service.criar(request, "visitante@exemplo.com");
 
         assertEquals("Pendente", reserva.getStatusReserva());
-        verify(horarios).validarReserva(espaco, sunday, LocalTime.of(10, 0), LocalTime.of(11, 0));
+        verify(horarios).validarReserva(espaco, dataFimDeSemana, LocalTime.of(10, 0), LocalTime.of(11, 0));
         verify(reservas).save(reserva);
     }
 
     @Test
-    void editarReservaParaDomingoRequerAprovacaoEParaOutroDiaNaoConfirmaSozinha() {
+    void editarReservaDeFimDeSemanaRequerAprovacaoEParaDiaUtilNaoConfirmaSozinha() {
         LocalDate sunday = LocalDate.now(ZoneId.of("America/Sao_Paulo"))
                 .with(TemporalAdjusters.next(DayOfWeek.SUNDAY));
+        LocalDate saturday = sunday.minusDays(1);
         LocalDate monday = sunday.plusDays(1);
         Usuario staff = new Usuario();
         staff.setIdUsuario(2);
@@ -339,12 +345,27 @@ class ReservaServiceTest {
         when(espacos.bloquearParaReserva(2)).thenReturn(Optional.of(espaco));
         when(horarios.validarReserva(eq(espaco), eq(sunday), any(LocalTime.class), any(LocalTime.class)))
                 .thenReturn(false);
+        when(horarios.validarReserva(eq(espaco), eq(saturday), any(LocalTime.class), any(LocalTime.class)))
+                .thenReturn(false);
         when(reservas.existeConflitoParaAtualizacao(eq(2), eq(14), eq(sunday),
+                any(LocalTime.class), any(LocalTime.class))).thenReturn(false);
+        when(reservas.existeConflitoParaAtualizacao(eq(2), eq(14), eq(saturday),
                 any(LocalTime.class), any(LocalTime.class))).thenReturn(false);
         when(reservas.existeConflitoParaAtualizacao(eq(2), eq(14), eq(monday),
                 any(LocalTime.class), any(LocalTime.class))).thenReturn(false);
         when(reservas.save(any(Reserva.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
+        ReservaEdicaoRequest saturdayEdit = new ReservaEdicaoRequest("Reunião", "Teste", saturday,
+                LocalTime.of(10, 0), LocalTime.of(11, 0), 2, null);
+        Reserva saturdayReservation = service.editar(14, saturdayEdit, "equipe@inpetu.ufsc.br");
+
+        assertEquals("Pendente", saturdayReservation.getStatusReserva());
+        assertNull(saturdayReservation.getIdUsuarioAprovador());
+        assertNull(saturdayReservation.getDataAprovacao());
+
+        reserva.setStatusReserva("Confirmada");
+        reserva.setIdUsuarioAprovador(3);
+        reserva.setDataAprovacao(java.time.LocalDateTime.now());
         ReservaEdicaoRequest sundayEdit = new ReservaEdicaoRequest("Reunião", "Teste", sunday,
                 LocalTime.of(10, 0), LocalTime.of(11, 0), 2, null);
         Reserva sundayReservation = service.editar(14, sundayEdit, "equipe@inpetu.ufsc.br");

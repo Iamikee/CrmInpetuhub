@@ -18,8 +18,8 @@ import java.util.Map;
 
 @Service
 public class HorarioFuncionamentoService {
-    private static final LocalTime ABERTURA_PADRAO = LocalTime.of(8, 0);
-    private static final LocalTime FECHAMENTO_PADRAO = LocalTime.of(22, 0);
+    private static final LocalTime ABERTURA_PADRAO = LocalTime.of(7, 0);
+    private static final LocalTime FECHAMENTO_PADRAO = LocalTime.of(21, 0);
     private static final Map<DayOfWeek, String> NOMES_DIAS = Map.of(
             DayOfWeek.MONDAY, "segundas-feiras",
             DayOfWeek.TUESDAY, "terças-feiras",
@@ -88,7 +88,7 @@ public class HorarioFuncionamentoService {
     }
 
     private HorarioFuncionamentoResponse padrao(DayOfWeek dia) {
-        boolean exigeAprovacao = dia == DayOfWeek.SUNDAY;
+        boolean exigeAprovacao = dia == DayOfWeek.SATURDAY || dia == DayOfWeek.SUNDAY;
         return new HorarioFuncionamentoResponse(dia.getValue(), false, exigeAprovacao,
                 ABERTURA_PADRAO, FECHAMENTO_PADRAO);
     }

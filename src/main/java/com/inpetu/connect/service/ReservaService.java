@@ -89,8 +89,9 @@ public class ReservaService {
         Double limiteMensal = limiteMensal(solicitante.getIdPersona());
         boolean excedeCota = limiteMensal != null
                 && horasReservadas(solicitante.getIdUsuario(), request.dataReserva(), null) + horasPedido > limiteMensal;
-        boolean domingo = request.dataReserva().getDayOfWeek() == DayOfWeek.SUNDAY;
-        boolean exigeAprovacao = domingo || exigeAprovacaoHorario || visitaGuiada || Boolean.TRUE.equals(espaco.getExigeAprovacaoManual())
+        DayOfWeek diaReserva = request.dataReserva().getDayOfWeek();
+        boolean fimDeSemana = diaReserva == DayOfWeek.SATURDAY || diaReserva == DayOfWeek.SUNDAY;
+        boolean exigeAprovacao = fimDeSemana || exigeAprovacaoHorario || visitaGuiada || Boolean.TRUE.equals(espaco.getExigeAprovacaoManual())
                 || solicitante.getIdPersona() == null || solicitante.getIdPersona() == 6 || excedeCota;
         reserva.setStatusReserva(exigeAprovacao ? "Pendente" : "Confirmada");
         reserva.setExcedeCota(excedeCota);
@@ -149,8 +150,9 @@ public class ReservaService {
         reserva.setQuantidadeParticipantes(request.quantidadeParticipantes());
         reserva.setTelefoneContato(TelefoneUtils.normalizarE164(request.telefoneContato()));
         reserva.setExcedeCota(excedeCota);
-        boolean domingo = request.dataReserva().getDayOfWeek() == DayOfWeek.SUNDAY;
-        if (domingo || excedeCota || exigeAprovacaoHorario) {
+        DayOfWeek diaReserva = request.dataReserva().getDayOfWeek();
+        boolean fimDeSemana = diaReserva == DayOfWeek.SATURDAY || diaReserva == DayOfWeek.SUNDAY;
+        if (fimDeSemana || excedeCota || exigeAprovacaoHorario) {
             reserva.setStatusReserva("Pendente");
             reserva.setIdUsuarioAprovador(null);
             reserva.setDataAprovacao(null);
