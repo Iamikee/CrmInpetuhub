@@ -128,11 +128,12 @@ class DemoDataSeedTest {
         assertEquals(9, reservasSeed.size());
         assertTrue(reservasSalvas.stream().filter(reserva -> "Pendente".equals(reserva.getStatusReserva())).count() >= 7);
         assertTrue(reservasSalvas.stream().filter(reserva -> "Confirmada".equals(reserva.getStatusReserva())).count() <= 2);
-        List<Reserva> reservasDominicais = reservasSalvas.stream()
-            .filter(reserva -> reserva.getDataReserva().getDayOfWeek() == DayOfWeek.SUNDAY)
+        List<Reserva> reservasFimDeSemana = reservasSalvas.stream()
+            .filter(reserva -> reserva.getDataReserva().getDayOfWeek() == DayOfWeek.SATURDAY
+                || reserva.getDataReserva().getDayOfWeek() == DayOfWeek.SUNDAY)
             .toList();
-        assertFalse(reservasDominicais.isEmpty());
-        assertTrue(reservasDominicais.stream().allMatch(reserva -> "Pendente".equals(reserva.getStatusReserva())));
+        assertFalse(reservasFimDeSemana.isEmpty());
+        assertTrue(reservasFimDeSemana.stream().allMatch(reserva -> "Pendente".equals(reserva.getStatusReserva())));
         for (int i = 0; i < reservasSalvas.size(); i++) {
             Reserva left = reservasSalvas.get(i);
             for (int j = i + 1; j < reservasSalvas.size(); j++) {

@@ -40,7 +40,7 @@ class ApiExceptionHandlerTest {
         request.setRequestURI("/api/v1/reservas");
         for (String message : new String[] {
                 "O espaço não funciona aos domingos.",
-                "O horário deve ficar entre 08:00 e 22:00."
+                "O horário deve ficar entre 07:00 e 21:00."
         }) {
             var response = handler.handleResponseStatusException(
                     new ResponseStatusException(HttpStatus.BAD_REQUEST, message), request);

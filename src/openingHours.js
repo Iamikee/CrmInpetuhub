@@ -28,7 +28,7 @@ export function getClosedDayMessage(date) {
 
 export function getApprovalMessage(schedule, date) {
   const hours = getHoursForDate(schedule, date)
-  return hours?.exigeAprovacao ? 'Pedidos para domingo dependem de aprovação da equipe.' : ''
+  return hours?.exigeAprovacao ? 'Pedidos para sábado e domingo dependem de aprovação da equipe.' : ''
 }
 
 export function validateOperatingHours(schedule, date, start, end) {

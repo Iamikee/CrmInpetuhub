@@ -37,24 +37,25 @@ class HorarioFuncionamentoServiceTest {
         assertEquals(7, result.size());
         for (int day = 0; day < 7; day++) {
             assertEquals(false, result.get(day).fechado());
-            assertEquals(LocalTime.of(8, 0), result.get(day).abertura());
-            assertEquals(LocalTime.of(22, 0), result.get(day).fechamento());
-            assertEquals(day == 6, result.get(day).exigeAprovacao());
+            assertEquals(LocalTime.of(7, 0), result.get(day).abertura());
+            assertEquals(LocalTime.of(21, 0), result.get(day).fechamento());
+            assertEquals(day >= 5, result.get(day).exigeAprovacao());
         }
     }
 
     @Test
-    void appliesTheSingleWeeklyScheduleAndSundayApproval() {
-        HorarioFuncionamento monday = horario(1, false, false, "08:00", "22:00");
-        HorarioFuncionamento sunday = horario(7, false, true, "08:00", "22:00");
-        when(horarios.findAllByOrderByDiaSemana()).thenReturn(List.of(monday, sunday));
+    void appliesTheSingleWeeklyScheduleAndWeekendApproval() {
+        HorarioFuncionamento monday = horario(1, false, false, "07:00", "21:00");
+        HorarioFuncionamento saturday = horario(6, false, true, "07:00", "21:00");
+        HorarioFuncionamento sunday = horario(7, false, true, "07:00", "21:00");
+        when(horarios.findAllByOrderByDiaSemana()).thenReturn(List.of(monday, saturday, sunday));
 
         List<HorarioFuncionamentoResponse> result = service.listar(false);
 
-        assertEquals(LocalTime.of(8, 0), result.get(0).abertura());
-        assertEquals(LocalTime.of(22, 0), result.get(0).fechamento());
+        assertEquals(LocalTime.of(7, 0), result.get(0).abertura());
+        assertEquals(LocalTime.of(21, 0), result.get(0).fechamento());
+        assertEquals(true, result.get(5).exigeAprovacao());
         assertEquals(true, result.get(6).exigeAprovacao());
-        assertEquals(false, result.get(5).exigeAprovacao());
     }
 
     @Test
@@ -63,45 +64,49 @@ class HorarioFuncionamentoServiceTest {
         Espaco space = espaco();
 
         boolean requiresApproval = service.validarReserva(space, LocalDate.of(2026, 11, 16),
-                LocalTime.of(8, 0), LocalTime.of(22, 0));
+                LocalTime.of(7, 0), LocalTime.of(21, 0));
         assertEquals(false, requiresApproval);
     }
 
     @Test
-    void permitsSundayOnlyWithinHoursAndRequiresApproval() {
+    void permitsSaturdayAndSundayOnlyWithinHoursAndRequiresApproval() {
         when(horarios.findAllByOrderByDiaSemana()).thenReturn(List.of());
         Espaco space = espaco();
 
-        boolean requiresApproval = service.validarReserva(space, LocalDate.of(2026, 11, 15),
-                LocalTime.of(8, 0), LocalTime.of(22, 0));
-        assertEquals(true, requiresApproval);
+        boolean saturdayRequiresApproval = service.validarReserva(space, LocalDate.of(2026, 11, 14),
+                LocalTime.of(7, 0), LocalTime.of(21, 0));
+        assertEquals(true, saturdayRequiresApproval);
+
+        boolean sundayRequiresApproval = service.validarReserva(space, LocalDate.of(2026, 11, 15),
+                LocalTime.of(7, 0), LocalTime.of(21, 0));
+        assertEquals(true, sundayRequiresApproval);
 
         ResponseStatusException beforeOpening = assertThrows(ResponseStatusException.class,
                 () -> service.validarReserva(space, LocalDate.of(2026, 11, 16),
-                        LocalTime.of(7, 59), LocalTime.of(8, 30)));
+                        LocalTime.of(6, 59), LocalTime.of(7, 30)));
         assertEquals(HttpStatus.BAD_REQUEST, beforeOpening.getStatusCode());
-        assertEquals("O horário deve ficar entre 08:00 e 22:00.", beforeOpening.getReason());
+        assertEquals("O horário deve ficar entre 07:00 e 21:00.", beforeOpening.getReason());
 
         ResponseStatusException afterClosing = assertThrows(ResponseStatusException.class,
                 () -> service.validarReserva(space, LocalDate.of(2026, 11, 16),
-                        LocalTime.of(21, 30), LocalTime.of(22, 1)));
+                        LocalTime.of(20, 30), LocalTime.of(21, 1)));
         assertEquals(HttpStatus.BAD_REQUEST, afterClosing.getStatusCode());
-        assertEquals("O horário deve ficar entre 08:00 e 22:00.", afterClosing.getReason());
+        assertEquals("O horário deve ficar entre 07:00 e 21:00.", afterClosing.getReason());
     }
 
     @Test
-    void keepsGuidedToursSeparateAndOpenBetweenEightAndTwentyTwoEveryDay() {
+    void keepsGuidedToursSeparateAndOpenBetweenSevenAndTwentyOneEveryDay() {
         Espaco space = espaco();
         space.setTipoEspaco("Visita guiada");
 
         boolean requiresApproval = service.validarReserva(space, LocalDate.of(2026, 11, 15),
-                LocalTime.of(21, 30), LocalTime.of(22, 0));
+                LocalTime.of(20, 30), LocalTime.of(21, 0));
         assertEquals(false, requiresApproval);
 
         ResponseStatusException outside = assertThrows(ResponseStatusException.class,
                 () -> service.validarReserva(space, LocalDate.of(2026, 11, 15),
-                        LocalTime.of(7, 59), LocalTime.of(8, 30)));
-        assertEquals("O horário deve ficar entre 08:00 e 22:00.", outside.getReason());
+                        LocalTime.of(6, 59), LocalTime.of(7, 30)));
+        assertEquals("O horário deve ficar entre 07:00 e 21:00.", outside.getReason());
     }
 
     private HorarioFuncionamento horario(int day, boolean closed, boolean approval, String open, String close) {
