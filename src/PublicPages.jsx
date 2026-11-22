@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown, Filter, Mail, MapPin, MessageCircle, Plus, ShieldCheck } from 'lucide-react'
 import { Avatar, Button, Logo, Modal, PasswordInput, PasswordRecoveryForm, PhoneInput, Title, calendarDaysUntil, formatBrazilianPhone, hasPhoneInput, isValidPhoneNumber, localDateValue, maskEmail, normalizePhoneToE164, request, reservationStatusClass, reservationStatusLabel, storeUser, uploadQuestion } from './App.jsx'
 import { CountUp, Reveal, Stagger, StaggerItem } from './motion/index.js'
+import { normalizeEmail, normalizeFullName, sanitizeNameInput, validateEmail, validateIdentityFields } from './validators.js'
 
 export function AccessPage({ onLogin, onSignup }) {
   const [email, setEmail] = useState('')
@@ -44,19 +45,25 @@ export function SignupPage({ onBack, onCodeSent }) {
   const [form, setForm] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '', confirmarSenha: '' })
   const [status, setStatus] = useState('')
   const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
+  const [validationAttempted, setValidationAttempted] = useState(false)
+  const [touched, setTouched] = useState({})
   const [sendFailedEmail, setSendFailedEmail] = useState('')
   const [resending, setResending] = useState(false)
+  const fieldErrors = validateIdentityFields(form)
+  const visibleFieldError = field => (validationAttempted || touched[field]) ? fieldErrors[field] : ''
   async function submit(event) {
     event.preventDefault()
     setStatus('')
     setPhoneSubmitAttempted(true)
-    if (form.nomeCompleto.trim().split(/\s+/).length < 2) return setStatus('Informe nome e sobrenome.')
+    setValidationAttempted(true)
+    if (Object.keys(fieldErrors).length) return
+    if (form.senha.length < 8 || form.senha.length > 64) return setStatus('A senha deve ter de 8 a 64 caracteres.')
     if (form.senha !== form.confirmarSenha) return setStatus('As senhas não coincidem.')
     if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) return
     try {
       const { confirmarSenha, ...cadastro } = form
-      await request('/usuarios/cadastro-publico', { method: 'POST', body: JSON.stringify({ ...cadastro, telefone: normalizePhoneToE164(form.telefone) }) })
-      onCodeSent(form.email.trim().toLowerCase())
+      await request('/usuarios/cadastro-publico', { method: 'POST', body: JSON.stringify({ ...cadastro, nomeCompleto: normalizeFullName(form.nomeCompleto), email: normalizeEmail(form.email), telefone: normalizePhoneToE164(form.telefone) }) })
+      onCodeSent(normalizeEmail(form.email))
     } catch (error) {
       setStatus(error.message)
       if (error.message.includes('não foi possível enviar o código')) setSendFailedEmail(form.email.trim().toLowerCase())
@@ -82,12 +89,12 @@ export function SignupPage({ onBack, onCodeSent }) {
     <div className="account-brand"><Logo variant="institutionalLight" className="account-brand-logo-light" /><Logo variant="institutionalDark" className="account-brand-logo-dark" /></div><div className="account-page-heading"><Title as="h1">Criar acesso público</Title><p>Cadastre-se para solicitar espaços e acompanhar seus agendamentos.</p></div>
     <section className="account-card account-card-signup">
       <p className="account-description">Preencha seus dados. A classificação da organização é feita pela equipe InPETU.</p>
-      <form className="form-stack account-form" onSubmit={submit}>
-        <label>Nome completo e sobrenome <span aria-hidden="true">*</span><input required autoComplete="name" value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: e.target.value })} /></label>
-        <label>E-mail <span aria-hidden="true">*</span><input required type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
+      <form className="form-stack account-form" noValidate onSubmit={submit}>
+        <label>Nome completo e sobrenome <span aria-hidden="true">*</span><input id="signup-name" required maxLength={100} autoComplete="name" className={visibleFieldError('nomeCompleto') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleFieldError('nomeCompleto'))} aria-describedby={visibleFieldError('nomeCompleto') ? 'signup-name-error' : undefined} value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: sanitizeNameInput(e.target.value) })} onBlur={() => { setTouched({ ...touched, nomeCompleto: true }); setForm(current => ({ ...current, nomeCompleto: normalizeFullName(current.nomeCompleto) })) }} />{visibleFieldError('nomeCompleto') && <small id="signup-name-error" className="field-validation-error" aria-live="polite">{visibleFieldError('nomeCompleto')}</small>}</label>
+        <label>E-mail <span aria-hidden="true">*</span><input id="signup-email" required type="email" autoComplete="email" maxLength={100} autoCapitalize="none" spellCheck="false" className={visibleFieldError('email') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleFieldError('email'))} aria-describedby={visibleFieldError('email') ? 'signup-email-error' : undefined} value={form.email} onChange={e => setForm({ ...form, email: normalizeEmail(e.target.value) })} onBlur={() => setTouched({ ...touched, email: true })} />{visibleFieldError('email') && <small id="signup-email-error" className="field-validation-error" aria-live="polite">{visibleFieldError('email')}</small>}</label>
         <label>Telefone<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} validationAttempted={phoneSubmitAttempted} /></label>
-        <label>Organização <span aria-hidden="true">*</span><input required value={form.organizacao} onChange={e => setForm({ ...form, organizacao: e.target.value })} /></label>
-        <label>Cargo ou vínculo <span aria-hidden="true">*</span><input required value={form.cargoVinculo} onChange={e => setForm({ ...form, cargoVinculo: e.target.value })} /></label>
+        <label>Organização <span aria-hidden="true">*</span><input id="signup-organization" required maxLength={100} className={visibleFieldError('organizacao') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleFieldError('organizacao'))} aria-describedby={visibleFieldError('organizacao') ? 'signup-organization-error' : undefined} value={form.organizacao} onChange={e => setForm({ ...form, organizacao: e.target.value })} onBlur={() => setTouched({ ...touched, organizacao: true })} />{visibleFieldError('organizacao') && <small id="signup-organization-error" className="field-validation-error" aria-live="polite">{visibleFieldError('organizacao')}</small>}</label>
+        <label>Cargo ou vínculo <span aria-hidden="true">*</span><input id="signup-role" required maxLength={80} className={visibleFieldError('cargoVinculo') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleFieldError('cargoVinculo'))} aria-describedby={visibleFieldError('cargoVinculo') ? 'signup-role-error' : undefined} value={form.cargoVinculo} onChange={e => setForm({ ...form, cargoVinculo: e.target.value })} onBlur={() => setTouched({ ...touched, cargoVinculo: true })} />{visibleFieldError('cargoVinculo') && <small id="signup-role-error" className="field-validation-error" aria-live="polite">{visibleFieldError('cargoVinculo')}</small>}</label>
         <label>Senha <span aria-hidden="true">*</span><PasswordInput required minLength={8} maxLength={64} autoComplete="new-password" value={form.senha} onChange={e => setForm({ ...form, senha: e.target.value })} /></label>
         <label>Confirmar senha <span aria-hidden="true">*</span><PasswordInput toggleLabel="confirmação da senha" required minLength={8} maxLength={64} autoComplete="new-password" value={form.confirmarSenha} onChange={e => setForm({ ...form, confirmarSenha: e.target.value })} /></label>
         {status && <p className="account-notice account-notice-error" role="alert">{status}</p>}
@@ -360,10 +367,17 @@ export function HelpPage() {
   const [status, setStatus] = useState('')
   const [progress, setProgress] = useState(0)
   const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
+  const [emailTouched, setEmailTouched] = useState(false)
+  const [submitAttempted, setSubmitAttempted] = useState(false)
+  const emailError = validateEmail(form.emailContato)
+  const visibleEmailError = (emailTouched || submitAttempted) ? emailError : ''
   async function submit(event) {
     event.preventDefault()
     setStatus('')
     setPhoneSubmitAttempted(true)
+    setSubmitAttempted(true)
+    if (emailError) return
+    if (!form.mensagemDuvida.trim()) return setStatus('Preencha a mensagem.')
     if (hasPhoneInput(form.telefoneContato) && !isValidPhoneNumber(form.telefoneContato)) return
     if (file && (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024)) return setStatus('Anexe PDF, PNG ou JPG de até 10 MB.')
     const payload = { ...form, telefoneContato: normalizePhoneToE164(form.telefoneContato) }
@@ -375,10 +389,12 @@ export function HelpPage() {
       setForm({ emailContato: '', telefoneContato: '', mensagemDuvida: '' })
       setFile(null)
       setPhoneSubmitAttempted(false)
+      setEmailTouched(false)
+      setSubmitAttempted(false)
     } catch (error) {
       setStatus(error.message)
       setProgress(0)
     }
   }
-  return <main className="inner-page help-page"><div className="help-intro"><Title as="h1">Vamos conversar<br /><em>sobre sua ideia?</em></Title><p>Tem dúvidas sobre os espaços, eventos ou quer descobrir como fazer parte do ecossistema? Escreva para a gente.</p><div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div><div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div></div><form className="help-form" onSubmit={submit}><div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>Retornamos em até dois dias úteis.</small></div></div><label>Seu e-mail<input required type="email" value={form.emailContato} onChange={e => setForm({ ...form, emailContato: e.target.value })} /></label><label>Telefone <span>(opcional)</span><PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm({ ...form, telefoneContato })} validationAttempted={phoneSubmitAttempted} /></label><label>Sua mensagem<textarea required rows="5" maxLength="5000" value={form.mensagemDuvida} onChange={e => setForm({ ...form, mensagemDuvida: e.target.value })} placeholder="Como podemos ajudar?" /></label><label className="upload-box"><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><span className="upload-icon"><Plus size={19} /></span><span><strong>{file ? file.name : 'Adicionar anexo'}</strong><small>PDF, PNG ou JPG · até 10 MB</small></span><span className="upload-action">Escolher arquivo</span></label>{progress > 0 && <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>}{status && <p className={status.startsWith('Mensagem') ? 'success-note' : 'form-message'}>{status}</p>}<Button type="submit">Enviar mensagem <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Seus dados são protegidos pela política de privacidade UFSC.</p></form></main>
+  return <main className="inner-page help-page"><div className="help-intro"><Title as="h1">Vamos conversar<br /><em>sobre sua ideia?</em></Title><p>Tem dúvidas sobre os espaços, eventos ou quer descobrir como fazer parte do ecossistema? Escreva para a gente.</p><div className="help-contact"><span><Mail size={17} /></span><div><small>FALE DIRETAMENTE</small><strong>inpetu@contato.ufsc.br</strong></div></div><div className="help-contact"><span><MapPin size={17} /></span><div><small>VENHA NOS VISITAR</small><strong>Lote 73 · Sapiens Parque, Florianópolis</strong></div></div></div><form className="help-form" noValidate onSubmit={submit}><div className="form-heading"><MessageCircle size={20} /><div><strong>Fale com a equipe</strong><small>Retornamos em até dois dias úteis.</small></div></div><label>Seu e-mail<input id="help-email" required type="email" autoComplete="email" maxLength={100} autoCapitalize="none" spellCheck="false" className={visibleEmailError ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleEmailError)} aria-describedby={visibleEmailError ? 'help-email-error' : undefined} value={form.emailContato} onChange={e => setForm({ ...form, emailContato: normalizeEmail(e.target.value) })} onBlur={() => setEmailTouched(true)} />{visibleEmailError && <small id="help-email-error" className="field-validation-error" aria-live="polite">{visibleEmailError}</small>}</label><label>Telefone <span>(opcional)</span><PhoneInput value={form.telefoneContato} onChange={telefoneContato => setForm({ ...form, telefoneContato })} validationAttempted={phoneSubmitAttempted} /></label><label>Sua mensagem<textarea required rows="5" maxLength="5000" value={form.mensagemDuvida} onChange={e => setForm({ ...form, mensagemDuvida: e.target.value })} placeholder="Como podemos ajudar?" /></label><label className="upload-box"><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><span className="upload-icon"><Plus size={19} /></span><span><strong>{file ? file.name : 'Adicionar anexo'}</strong><small>PDF, PNG ou JPG · até 10 MB</small></span><span className="upload-action">Escolher arquivo</span></label>{progress > 0 && <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>}{status && <p className={status.startsWith('Mensagem') ? 'success-note' : 'form-message'}>{status}</p>}<Button type="submit">Enviar mensagem <ArrowRight size={16} /></Button><p className="form-footnote"><ShieldCheck size={14} /> Seus dados são protegidos pela política de privacidade UFSC.</p></form></main>
 }

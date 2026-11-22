@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ClientProfileDialog } from './App.jsx'
+import { ClientProfileDialog, ProfileDialog } from './App.jsx'
 
 describe('client profile dialog', () => {
   afterEach(() => {
@@ -179,5 +179,80 @@ describe('client profile dialog', () => {
     expect(onRole).toHaveBeenCalledWith(client, 4)
     expect(await within(dialog).findByText('Perfil de acesso atualizado. A pessoa deverá entrar novamente.')).toBeTruthy()
     expect(within(dialog).getByText('Solicitante')).toBeTruthy()
+  })
+
+  it('blocks invalid client edits and normalizes name and email before saving', async () => {
+    const client = {
+      idUsuario: 12,
+      nomeCompleto: 'Pessoa de teste',
+      email: 'pessoa@example.invalid',
+      telefone: '',
+      organizacao: 'InPETU',
+      cargoVinculo: 'Pesquisadora',
+      ativo: true,
+    }
+    const onSave = vi.fn().mockResolvedValue({})
+
+    render(<ClientProfileDialog
+      client={client}
+      reservations={[]}
+      tickets={[]}
+      auditItems={[]}
+      close={vi.fn()}
+      onSave={onSave}
+      onPersona={vi.fn()}
+      onDeactivate={vi.fn()}
+    />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Pessoa de teste' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Editar dados' }))
+    const name = within(dialog).getByLabelText('Nome completo e sobrenome')
+    const email = within(dialog).getByLabelText('E-mail')
+    fireEvent.change(name, { target: { value: 'João 123 Silva' } })
+    fireEvent.change(email, { target: { value: '765765' } })
+    fireEvent.blur(email)
+    expect(await within(dialog).findByText('E-mail inválido')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Salvar alterações' }))
+    expect(onSave).not.toHaveBeenCalled()
+
+    fireEvent.change(email, { target: { value: 'PESSOA@example.invalid' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Salvar alterações' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    expect(onSave.mock.calls[0][1]).toMatchObject({
+      nomeCompleto: 'João Silva',
+      email: 'pessoa@example.invalid',
+    })
+  })
+
+  it('shows profile errors after blur and prevents the invalid profile request', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        idUsuario: 22,
+        nomeCompleto: 'Pessoa de teste',
+        email: 'pessoa@example.invalid',
+        telefone: '',
+        organizacao: 'InPETU',
+        cargoVinculo: 'Pesquisadora',
+        perfil: 4,
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ProfileDialog
+      open
+      close={vi.fn()}
+      user={{ idUsuario: 22, nome: 'Pessoa de teste', perfil: 4 }}
+      onUserUpdate={vi.fn()}
+    />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Meu perfil' })
+    const name = await within(dialog).findByLabelText('Nome')
+    fireEvent.change(name, { target: { value: 'Maria' } })
+    expect(within(dialog).queryByText('Informe nome e sobrenome')).toBeNull()
+    fireEvent.blur(name)
+    expect(await within(dialog).findByText('Informe nome e sobrenome')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Salvar perfil' }))
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 })

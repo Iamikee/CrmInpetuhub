@@ -5,6 +5,7 @@ import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Building2, C
 import { personas, personaQuotaLabel } from './personas.js'
 import { formatRelativeNotificationDate, groupNotificationsByDay, normalizeNotificationMessage, notificationDestination } from './notifications.js'
 import { brazilianAreaCodes, formatPhoneNumber, formatPhoneSubscriber, hasPhoneInput, isValidPhoneNumber, normalizePhoneToE164, parsePhoneParts, phoneCountryCodes, phoneNumberFromParts } from './phone.js'
+import { normalizeEmail, normalizeFullName, sanitizeNameInput, validateIdentityFields } from './validators.js'
 import { BRAND_LOGOS } from './brand.js'
 import { CountUp, Reveal, useScrollProgress } from './motion/index.js'
 import ErrorBoundary from './ErrorBoundary.jsx'
@@ -1031,6 +1032,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
+  const [identityTouched, setIdentityTouched] = useState({})
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [profileLoadAttempt, setProfileLoadAttempt] = useState(0)
@@ -1048,6 +1050,8 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
     || form.cargoVinculo !== (profile.cargoVinculo || '')
   )
   const invalidPhone = hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)
+  const identityErrors = validateIdentityFields(form)
+  const visibleIdentityError = field => (phoneSubmitAttempted || identityTouched[field]) ? identityErrors[field] : ''
   const passwordMismatch = Boolean(passwordForm.confirmarSenha)
     && passwordForm.novaSenha !== passwordForm.confirmarSenha
   const invalidNewPassword = passwordForm.novaSenha.length < 8
@@ -1061,6 +1065,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
     setError('')
     setSuccess('')
     setPhoneSubmitAttempted(false)
+    setIdentityTouched({})
     setProfile(null)
     request('/usuarios/me').then(data => {
       if (!active) return
@@ -1093,10 +1098,11 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
   async function saveProfile(event) {
     event.preventDefault()
     setPhoneSubmitAttempted(true)
-    if (invalidPhone || !profileChanged) return
+    setIdentityTouched({ nomeCompleto: true, organizacao: true, cargoVinculo: true })
+    if (invalidPhone || Object.keys(identityErrors).length || !profileChanged) return
     setSaving(true); setError(''); setSuccess('')
     try {
-      const updated = await request('/usuarios/me', { method: 'PUT', body: JSON.stringify({ ...form, telefone: normalizePhoneToE164(form.telefone) }) })
+      const updated = await request('/usuarios/me', { method: 'PUT', body: JSON.stringify({ ...form, nomeCompleto: normalizeFullName(form.nomeCompleto), organizacao: form.organizacao.trim(), cargoVinculo: form.cargoVinculo.trim(), telefone: normalizePhoneToE164(form.telefone) }) })
       const normalized = { ...updated, telefone: normalizePhoneToE164(updated.telefone) }
       setProfile(normalized)
       onUserUpdate?.({ ...user, nome: updated.nomeCompleto, email: updated.email })
@@ -1192,17 +1198,17 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
           <input ref={photoInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { uploadPhoto(event.target.files?.[0]); event.target.value = '' }} />
         </div></div>
       </section>
-      <form className="profile-editor-form" onSubmit={saveProfile}>
-        <label htmlFor="profile-name">Nome<input id="profile-name" required maxLength="100" value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
+      <form className="profile-editor-form" noValidate onSubmit={saveProfile}>
+        <label htmlFor="profile-name">Nome<input id="profile-name" required maxLength="100" className={visibleIdentityError('nomeCompleto') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleIdentityError('nomeCompleto'))} aria-describedby={visibleIdentityError('nomeCompleto') ? 'profile-name-error' : undefined} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: sanitizeNameInput(event.target.value) })} onBlur={() => { setIdentityTouched(current => ({ ...current, nomeCompleto: true })); setForm(current => ({ ...current, nomeCompleto: normalizeFullName(current.nomeCompleto) })) }} />{visibleIdentityError('nomeCompleto') && <small id="profile-name-error" className="field-validation-error" aria-live="polite">{visibleIdentityError('nomeCompleto')}</small>}</label>
         <label htmlFor="profile-phone">Telefone<PhoneInput id="profile-phone" value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} validationAttempted={phoneSubmitAttempted} /></label>
-        <label htmlFor="profile-organization">Organização<input id="profile-organization" required maxLength="100" value={form.organizacao} readOnly={isStaff} onChange={event => setForm({ ...form, organizacao: event.target.value })} /></label>
-        <label htmlFor="profile-role">Cargo ou vínculo<input id="profile-role" required maxLength="100" value={form.cargoVinculo} onChange={event => setForm({ ...form, cargoVinculo: event.target.value })} /></label>
+        <label htmlFor="profile-organization">Organização<input id="profile-organization" required maxLength="100" className={visibleIdentityError('organizacao') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleIdentityError('organizacao'))} aria-describedby={visibleIdentityError('organizacao') ? 'profile-organization-error' : undefined} value={form.organizacao} readOnly={isStaff} onChange={event => setForm({ ...form, organizacao: event.target.value })} onBlur={() => setIdentityTouched(current => ({ ...current, organizacao: true }))} />{visibleIdentityError('organizacao') && <small id="profile-organization-error" className="field-validation-error" aria-live="polite">{visibleIdentityError('organizacao')}</small>}</label>
+        <label htmlFor="profile-role">Cargo ou vínculo<input id="profile-role" required maxLength="80" className={visibleIdentityError('cargoVinculo') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleIdentityError('cargoVinculo'))} aria-describedby={visibleIdentityError('cargoVinculo') ? 'profile-role-error' : undefined} value={form.cargoVinculo} onChange={event => setForm({ ...form, cargoVinculo: event.target.value })} onBlur={() => setIdentityTouched(current => ({ ...current, cargoVinculo: true }))} />{visibleIdentityError('cargoVinculo') && <small id="profile-role-error" className="field-validation-error" aria-live="polite">{visibleIdentityError('cargoVinculo')}</small>}</label>
         <div className="profile-readonly">
           <div><small>E-MAIL</small><strong><LockKeyhole size={14} aria-hidden="true" />{profile.email}</strong><small>Para alterar o e-mail, fale com a equipe do InPETU</small></div>
           <div><small>PERFIL DE ACESSO</small><strong>{perfilLabel}</strong></div>
         </div>
         {error && <p className="form-message" role="alert">{error}</p>}{success && <p className="success-note" role="status">{success}</p>}
-        <Button className="profile-save-action" type="submit" disabled={saving || !profileChanged || invalidPhone}>{saving ? 'Salvando...' : 'Salvar perfil'}</Button>
+        <Button className="profile-save-action" type="submit" disabled={saving || !profileChanged}>{saving ? 'Salvando...' : 'Salvar perfil'}</Button>
       </form>
       <form className="profile-password-form" onSubmit={changePassword}>
         <Title as="h3">Alterar senha</Title>
@@ -1558,6 +1564,7 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
+  const [identityTouched, setIdentityTouched] = useState({})
   const [personaValue, setPersonaValue] = useState(client?.idPersona ? String(client.idPersona) : '')
   const [personaBusy, setPersonaBusy] = useState(false)
   const [personaFeedback, setPersonaFeedback] = useState('')
@@ -1591,6 +1598,8 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   const personaChanged = Boolean(personaValue) && Number(personaValue) !== Number(client.idPersona || 0)
   const profileChanged = Number(profileValue) !== Number(client.idPerfil)
   const invalidPhone = hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)
+  const identityErrors = validateIdentityFields(form)
+  const visibleIdentityError = field => (phoneSubmitAttempted || identityTouched[field]) ? identityErrors[field] : ''
   const fields = [
     ['E-mail', form.email || 'Não informado'],
     ['Telefone / WhatsApp', form.telefone || 'Não informado'],
@@ -1603,11 +1612,18 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
     event.preventDefault()
     if (busy) return
     setPhoneSubmitAttempted(true)
-    if (invalidPhone) return
+    setIdentityTouched({ nomeCompleto: true, email: true, organizacao: true, cargoVinculo: true })
+    if (invalidPhone || Object.keys(identityErrors).length) return
     setBusy(true)
     setError('')
     try {
-      await onSave(client, form)
+      await onSave(client, {
+        ...form,
+        nomeCompleto: normalizeFullName(form.nomeCompleto),
+        email: normalizeEmail(form.email),
+        organizacao: form.organizacao.trim(),
+        cargoVinculo: form.cargoVinculo.trim(),
+      })
       setEditing(false)
     } catch (saveError) {
       setError(saveError.message)
@@ -1714,21 +1730,21 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
             <div className="client-profile-actions"><button type="button" className="client-profile-action client-profile-action-muted" disabled={resetBusy} onClick={() => { setResetOpen(false); setResetError('') }}>Cancelar</button><button type="submit" className="client-profile-action" disabled={resetBusy}>{resetBusy ? 'Redefinindo...' : 'Confirmar redefinição'}</button></div>
           </form>}
         </section>}
-        <form className="client-profile-edit-form" onSubmit={save}>
+        <form className="client-profile-edit-form" noValidate onSubmit={save}>
           {editing ? <div className="client-profile-grid client-profile-grid-edit">
-            <label>Nome completo e sobrenome<input required maxLength={100} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: event.target.value })} /></label>
-            <label>E-mail<input required type="email" maxLength={100} value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
+            <label>Nome completo e sobrenome<input id="client-name" required maxLength={100} className={visibleIdentityError('nomeCompleto') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleIdentityError('nomeCompleto'))} aria-describedby={visibleIdentityError('nomeCompleto') ? 'client-name-error' : undefined} value={form.nomeCompleto} onChange={event => setForm({ ...form, nomeCompleto: sanitizeNameInput(event.target.value) })} onBlur={() => { setIdentityTouched(current => ({ ...current, nomeCompleto: true })); setForm(current => ({ ...current, nomeCompleto: normalizeFullName(current.nomeCompleto) })) }} />{visibleIdentityError('nomeCompleto') && <small id="client-name-error" className="field-validation-error" aria-live="polite">{visibleIdentityError('nomeCompleto')}</small>}</label>
+            <label>E-mail<input id="client-email" required type="email" maxLength={100} autoCapitalize="none" spellCheck="false" className={visibleIdentityError('email') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleIdentityError('email'))} aria-describedby={visibleIdentityError('email') ? 'client-email-error' : undefined} value={form.email} onChange={event => setForm({ ...form, email: normalizeEmail(event.target.value) })} onBlur={() => setIdentityTouched(current => ({ ...current, email: true }))} />{visibleIdentityError('email') && <small id="client-email-error" className="field-validation-error" aria-live="polite">{visibleIdentityError('email')}</small>}</label>
             <label>Telefone / WhatsApp<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} validationAttempted={phoneSubmitAttempted} /></label>
-            <label>Organização<input required maxLength={100} value={form.organizacao} onChange={event => setForm({ ...form, organizacao: event.target.value })} /><small>A alteração vale só para seu cadastro. Organizações novas ficam pendentes de classificação.</small></label>
-            <label>Vínculo / cargo<input required maxLength={100} value={form.cargoVinculo} onChange={event => setForm({ ...form, cargoVinculo: event.target.value })} /></label>
+            <label>Organização<input id="client-organization" required maxLength={100} className={visibleIdentityError('organizacao') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleIdentityError('organizacao'))} aria-describedby={visibleIdentityError('organizacao') ? 'client-organization-error' : undefined} value={form.organizacao} onChange={event => setForm({ ...form, organizacao: event.target.value })} onBlur={() => setIdentityTouched(current => ({ ...current, organizacao: true }))} />{visibleIdentityError('organizacao') && <small id="client-organization-error" className="field-validation-error" aria-live="polite">{visibleIdentityError('organizacao')}</small>}<small>A alteração vale só para seu cadastro. Organizações novas ficam pendentes de classificação.</small></label>
+            <label>Vínculo / cargo<input id="client-role" required maxLength={80} className={visibleIdentityError('cargoVinculo') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleIdentityError('cargoVinculo'))} aria-describedby={visibleIdentityError('cargoVinculo') ? 'client-role-error' : undefined} value={form.cargoVinculo} onChange={event => setForm({ ...form, cargoVinculo: event.target.value })} onBlur={() => setIdentityTouched(current => ({ ...current, cargoVinculo: true }))} />{visibleIdentityError('cargoVinculo') && <small id="client-role-error" className="field-validation-error" aria-live="polite">{visibleIdentityError('cargoVinculo')}</small>}</label>
             <div className="client-profile-field"><span>Data de cadastro</span><strong>{fields[4][1]}</strong></div>
             <div className="client-profile-field"><span>Status</span><strong>{fields[5][1]}</strong></div>
           </div> : <div className="client-profile-grid">{fields.map(([label, value]) => <div className="client-profile-field" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
           {error && <p className="form-message" role="alert">{error}</p>}
           <div className="client-profile-actions">
             {editing
-              ? <><button type="button" className="client-profile-action client-profile-action-muted" disabled={busy} onClick={() => { setEditing(false); setError(''); setPhoneSubmitAttempted(false); setForm({ nomeCompleto: client.nomeCompleto || '', email: client.email || '', telefone: client.telefone || '', organizacao: client.organizacao || '', cargoVinculo: client.cargoVinculo || '' }) }}>Cancelar edição</button><button type="submit" className="client-profile-action" disabled={busy}>{busy ? 'Salvando...' : 'Salvar alterações'}</button></>
-              : <><button type="button" className="client-profile-action" onClick={() => { setEditing(true); setError(''); setPhoneSubmitAttempted(false) }}>Editar dados</button>{canResetPassword && <button type="button" className="client-profile-action" onClick={() => { setResetResult(''); setResetOpen(true); setResetError('') }}>Redefinir senha</button>}</>}
+              ? <><button type="button" className="client-profile-action client-profile-action-muted" disabled={busy} onClick={() => { setEditing(false); setError(''); setPhoneSubmitAttempted(false); setIdentityTouched({}); setForm({ nomeCompleto: client.nomeCompleto || '', email: client.email || '', telefone: client.telefone || '', organizacao: client.organizacao || '', cargoVinculo: client.cargoVinculo || '' }) }}>Cancelar edição</button><button type="submit" className="client-profile-action" disabled={busy}>{busy ? 'Salvando...' : 'Salvar alterações'}</button></>
+              : <><button type="button" className="client-profile-action" onClick={() => { setEditing(true); setError(''); setPhoneSubmitAttempted(false); setIdentityTouched({}) }}>Editar dados</button>{canResetPassword && <button type="button" className="client-profile-action" onClick={() => { setResetResult(''); setResetOpen(true); setResetError('') }}>Redefinir senha</button>}</>}
           </div>
         </form>
         {canDeactivate && client.ativo !== false && <section className="client-profile-deactivation">

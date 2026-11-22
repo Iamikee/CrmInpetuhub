@@ -58,7 +58,7 @@ public class ApiExceptionHandler {
 
     private String validationMessage(FieldError error) {
         String message = error.getDefaultMessage();
-        if (message != null && (message.contains("celular") || message.contains("formato"))) {
+        if (message != null && !message.startsWith("must ") && !message.startsWith("size must ")) {
             return message;
         }
         String code = error.getCode();

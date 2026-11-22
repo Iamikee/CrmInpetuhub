@@ -11,6 +11,7 @@ import java.time.LocalTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProfileRequestValidationTest {
@@ -129,5 +130,60 @@ class ProfileRequestValidationTest {
         assertFalse(validator.validate(new AlterarSenhaRequest("old", "short", "short")).isEmpty());
         assertFalse(validator.validate(new AlterarSenhaRequest("old", "long-enough", "")).isEmpty());
         assertTrue(validator.validate(new AlterarSenhaRequest("old", "long-enough", "long-enough")).isEmpty());
+    }
+
+    @Test
+    void enforcesFullNameEmailOrganizationAndRoleRulesAcrossWriteRequests() {
+        assertFieldRejected(new CadastroPublicoRequest(
+                "765765", "joana@example.org", "", "InPETU", "Pesquisadora", "SenhaSegura123"), "nomeCompleto");
+        assertFieldRejected(new CadastroEdicaoRequest(
+                "João 123 Silva", "joana@example.org", "", "InPETU", "Pesquisadora"), "nomeCompleto");
+        assertFieldRejected(new PerfilUsuarioRequest(
+                "Maria", "", "InPETU", "Pesquisadora"), "nomeCompleto");
+
+        assertFieldRejected(new CadastroPublicoRequest(
+                "Joana Silva", "765765", "", "InPETU", "Pesquisadora", "SenhaSegura123"), "email");
+        assertFieldRejected(new CadastroEdicaoRequest(
+                "Joana Silva", "a@b", "", "InPETU", "Pesquisadora"), "email");
+        assertFieldRejected(new DuvidaRequest("a@b", "", "Mensagem de teste."), "emailContato");
+
+        assertFieldRejected(new CadastroPublicoRequest(
+                "Joana Silva", "joana@example.org", "", "765765", "Pesquisadora", "SenhaSegura123"), "organizacao");
+        assertFieldRejected(new CadastroEdicaoRequest(
+                "Joana Silva", "joana@example.org", "", "!!", "Pesquisadora"), "organizacao");
+        assertFieldRejected(new PerfilUsuarioRequest(
+                "Joana Silva", "", "InPETU", "1"), "cargoVinculo");
+    }
+
+    @Test
+    void acceptsNormalizedNamesInternationalLettersAndTheAllowedThreeMOrganization() {
+        var request = new CadastroPublicoRequest(
+                "  João   da Silva  ", "Joana@Example.org", "", "3M", "P&D", "SenhaSegura123");
+
+        assertTrue(validator.validate(request).isEmpty());
+        assertEquals("João da Silva", request.nomeCompleto());
+        assertEquals("joana@example.org", request.email());
+    }
+
+    @Test
+    void enforcesExistingEmailAndOrganizationColumnLengths() {
+        String emailAtLimit = "a".repeat(64) + "@" + "b".repeat(32) + ".cc";
+        assertEquals(100, emailAtLimit.length());
+        assertTrue(validator.validate(new CadastroEdicaoRequest(
+                "Joana Silva", emailAtLimit, "", "InPETU", "Pesquisadora")).stream()
+                .noneMatch(violation -> violation.getPropertyPath().toString().equals("email")));
+        assertFieldRejected(new CadastroEdicaoRequest(
+                "Joana Silva", "a".repeat(64) + "@" + "b".repeat(33) + ".cc", "", "InPETU", "Pesquisadora"), "email");
+        assertFieldRejected(new CadastroPublicoRequest(
+                "Joana Silva", "joana@example.org", "", "O".repeat(101), "Pesquisadora", "SenhaSegura123"), "organizacao");
+
+        assertFieldRejected(new PerfilUsuarioRequest(
+                "Joana Silva", "", "InPETU", "P".repeat(81)), "cargoVinculo");
+    }
+
+    private static void assertFieldRejected(Object request, String field) {
+        assertTrue(validator.validate(request).stream()
+                .anyMatch(violation -> violation.getPropertyPath().toString().equals(field)),
+                () -> request.getClass().getSimpleName() + " did not reject invalid " + field);
     }
 }

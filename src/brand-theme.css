@@ -2487,6 +2487,26 @@ body[data-crm-theme="dark"] .dialog-panel {
   line-height: 1.4;
 }
 
+:root[data-theme] input.field-validation-input[aria-invalid="true"] {
+  border-color: var(--color-danger) !important;
+}
+
+.field-validation-error {
+  display: block;
+  color: var(--color-danger);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+:root[data-theme="dark"] input.field-validation-input[aria-invalid="true"] {
+  border-color: #ffb4ab !important;
+}
+
+:root[data-theme="dark"] .field-validation-error {
+  color: #ffb4ab;
+}
+
 .dialog-panel .dialog-title {
   color: var(--color-text);
 }
