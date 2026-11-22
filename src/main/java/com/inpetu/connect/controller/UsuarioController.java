@@ -259,9 +259,9 @@ public class UsuarioController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Use a opção de alteração do próprio perfil para mudar sua senha.");
         }
-        if (usuario.getIdPerfil() < responsavel.getIdPerfil()) {
+        if (nivelAutoridade(usuario.getIdPerfil()) < nivelAutoridade(responsavel.getIdPerfil())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Não é permitido redefinir a senha de um perfil superior.");
+                    "Não é permitido redefinir a senha de um perfil com maior autoridade.");
         }
         if (auditoria.countRecentPasswordResets(responsavel.getIdUsuario(), LocalDateTime.now().minusHours(1)) >= 5) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
@@ -279,6 +279,11 @@ public class UsuarioController {
         registrar("usuario", id, "REDEFINICAO_SENHA",
                 "Senha temporária definida pela equipe.", auth.getName());
         return Map.of("senhaTemporaria", temporaryPassword, "geradaAutomaticamente", Boolean.toString(generate));
+    }
+
+    private int nivelAutoridade(Integer idPerfil) {
+        if (idPerfil == null) return Integer.MAX_VALUE;
+        return idPerfil == 5 ? 0 : idPerfil;
     }
 
     @GetMapping @PreAuthorize("hasAnyRole('COORDENADOR','GESTOR_ESPACOS','STAFF')")
