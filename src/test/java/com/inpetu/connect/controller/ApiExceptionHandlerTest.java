@@ -43,13 +43,15 @@ class ApiExceptionHandlerTest {
 
         Method method = ApiExceptionHandlerTest.class
                 .getDeclaredMethod("returnsHelpfulFieldValidationMessageWithBadRequestStatus");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/v1/cadastro");
         var response = handler.handleValidation(
-                new MethodArgumentNotValidException(new MethodParameter(Objects.requireNonNull(method), -1), bindingResult));
-        var body = Objects.requireNonNull(response.getBody());
+                new MethodArgumentNotValidException(new MethodParameter(Objects.requireNonNull(method), -1), bindingResult),
+                request);
+        Map<?, ?> body = (Map<?, ?>) Objects.requireNonNull(response.getBody());
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals("Informe um celular no formato (48) 99999-9999.", body.get("message"));
-        assertEquals("Informe um celular no formato (48) 99999-9999.",
-                ((Map<?, ?>) body.get("errors")).get("telefone"));
+        assertEquals("Informe um celular no formato (48) 99999-9999.", ((Map<?, ?>) body.get("errors")).get("telefone"));
     }
 }

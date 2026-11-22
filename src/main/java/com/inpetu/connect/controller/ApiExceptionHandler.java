@@ -1,6 +1,8 @@
 package com.inpetu.connect.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
+import com.inpetu.connect.dto.HelpdeskErrorResponse;
+import com.inpetu.connect.service.HelpdeskException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -20,6 +22,15 @@ import java.util.Map;
 public class ApiExceptionHandler {
     private static final Logger logger = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
+    @ExceptionHandler(HelpdeskException.class)
+    public ResponseEntity<HelpdeskErrorResponse> handleHelpdeskException(HelpdeskException exception) {
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(exception.getStatus());
+        if (exception.getRetryAfterSeconds() != null) {
+            response.header("Retry-After", Long.toString(exception.getRetryAfterSeconds()));
+        }
+        return response.body(new HelpdeskErrorResponse(exception.getCode(), exception.getMessage()));
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiErrorResponse> handleResponseStatusException(
             ResponseStatusException exception, HttpServletRequest request) {
@@ -36,7 +47,7 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException exception) {
+    public ResponseEntity<?> handleValidation(MethodArgumentNotValidException exception, HttpServletRequest request) {
         Map<String, String> errors = new LinkedHashMap<>();
         for (FieldError fieldError : exception.getBindingResult().getFieldErrors()) {
             errors.putIfAbsent(fieldError.getField(), validationMessage(fieldError));
@@ -44,6 +55,14 @@ public class ApiExceptionHandler {
         String message = errors.values().stream().findFirst()
                 .orElse("Revise os dados informados e tente novamente.");
         logger.warn("Requisição rejeitada por validação nos campos: {}", errors.keySet());
+        if (request.getRequestURI().startsWith("/api/v1/helpdesk/")) {
+            boolean messageTooLong = exception.getBindingResult().getFieldErrors().stream()
+                .anyMatch(error -> ("motivo".equals(error.getField()) || "body".equals(error.getField()))
+                    && error.getRejectedValue() instanceof String value && value.length() > 5000);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new HelpdeskErrorResponse(messageTooLong ? "MESSAGE_TOO_LONG" : "VALIDATION_ERROR",
+                        messageTooLong ? "A mensagem deve ter no máximo 5.000 caracteres." : message));
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("message", message, "errors", errors));
     }

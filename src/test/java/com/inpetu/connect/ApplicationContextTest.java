@@ -1,10 +1,17 @@
 package com.inpetu.connect;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.inpetu.connect.config.OtpSecretValidator;
 import com.inpetu.connect.controller.DuvidaController;
 import com.inpetu.connect.model.Espaco;
+import com.inpetu.connect.model.HelpdeskStatusHistory;
+import com.inpetu.connect.model.HelpdeskTicket;
 import com.inpetu.connect.model.Usuario;
 import com.inpetu.connect.repository.EspacoRepository;
+import com.inpetu.connect.repository.HelpdeskStatusHistoryRepository;
+import com.inpetu.connect.repository.HelpdeskTicketRepository;
+import com.inpetu.connect.repository.LogAuditoriaRepository;
 import com.inpetu.connect.repository.UsuarioRepository;
 import com.inpetu.connect.security.SenhaTemporariaFilter;
 import com.inpetu.connect.service.BrevoEmailClient;
@@ -26,9 +33,11 @@ import org.thymeleaf.context.Context;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -40,6 +49,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import org.springframework.http.MediaType;
@@ -68,6 +78,10 @@ class ApplicationContextTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private EspacoRepository espacoRepository;
     @Autowired private UsuarioRepository usuarioRepository;
+    @Autowired private HelpdeskTicketRepository helpdeskTicketRepository;
+    @Autowired private HelpdeskStatusHistoryRepository helpdeskStatusHistoryRepository;
+    @Autowired private LogAuditoriaRepository logAuditoriaRepository;
+    @Autowired private ObjectMapper objectMapper;
 
     @Test
     void loadsTheCompleteApplicationContextWithRealSpringComponents() {
@@ -240,5 +254,265 @@ class ApplicationContextTest {
             .andExpect(status().isNotFound());
     }
 
+    @Test
+    void createsTicketAndPublicAllowlistDoesNotExposeContactOrGlobalIds() throws Exception {
+        String email = "teste-" + UUID.randomUUID() + "@example.invalid";
+        String key = UUID.randomUUID().toString();
+        var creation = mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .with(request -> {
+                    request.setRemoteAddr("198.51.100.71");
+                    return request;
+                })
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(helpdeskRequest(email, "TESTE assunto", "TESTE motivo")))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.status").value("ABERTO"))
+            .andReturn();
+
+        JsonNode created = objectMapper.readTree(creation.getResponse().getContentAsString());
+        String publicCode = created.path("code").asText();
+        String token = created.path("token").asText();
+        assertEquals(43, token.length());
+
+        String publicResponse = mockMvc.perform(get("/api/v1/helpdesk/tickets/{code}", publicCode)
+                .header("X-Ticket-Token", token))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.messages[0].seq").value(1))
+            .andExpect(jsonPath("$.messages[0].body").value("TESTE motivo"))
+            .andReturn().getResponse().getContentAsString();
+        assertFalse(publicResponse.contains(email));
+        assertFalse(publicResponse.contains("TESTE Solicitante"));
+        assertFalse(publicResponse.contains("\"id\""));
+        assertFalse(publicResponse.contains("tokenHash"));
+
+        HelpdeskTicket ticket = helpdeskTicketRepository.findByPublicCode(publicCode).orElseThrow();
+        var audit = logAuditoriaRepository.findAll().stream()
+            .filter(entry -> "helpdesk_ticket".equals(entry.getTabelaAfetada())
+                && entry.getDetalhesAlteracao() != null
+                && entry.getDetalhesAlteracao().contains(publicCode))
+            .findFirst().orElseThrow();
+        assertFalse(audit.getDetalhesAlteracao().contains(email));
+        assertFalse(audit.getDetalhesAlteracao().contains("TESTE motivo"));
+        assertEquals(ticket.getId().intValue(), audit.getIdRegistroAfetado());
+    }
+
+    @Test
+    void requiresUuidV4AndDoesNotReturnTokenOnIdempotentReplay() throws Exception {
+        String email = "teste-idempotencia-" + UUID.randomUUID() + "@example.invalid";
+        String body = helpdeskRequest(email, "TESTE assunto", "TESTE motivo");
+        mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_INVALID"));
+
+        String key = UUID.randomUUID().toString();
+        var first = mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .with(request -> {
+                    request.setRemoteAddr("198.51.100.72");
+                    return request;
+                })
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isCreated())
+            .andReturn();
+        assertTrue(objectMapper.readTree(first.getResponse().getContentAsString()).hasNonNull("token"));
+
+        mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .with(request -> {
+                    request.setRemoteAddr("198.51.100.72");
+                    return request;
+                })
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("IDEMPOTENCY_REPLAY_TOKEN_UNAVAILABLE"))
+            .andExpect(jsonPath("$.token").doesNotExist());
+
+        mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .with(request -> {
+                    request.setRemoteAddr("198.51.100.72");
+                    return request;
+                })
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(helpdeskRequest(email, "TESTE alterado", "TESTE motivo")))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"));
+    }
+
+    @Test
+    void returnsSameNotFoundBodyForUnknownCodeAndWrongToken() throws Exception {
+        String email = "teste-404-" + UUID.randomUUID() + "@example.invalid";
+        JsonNode created = objectMapper.readTree(mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .with(request -> {
+                    request.setRemoteAddr("198.51.100.73");
+                    return request;
+                })
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(helpdeskRequest(email, "TESTE assunto", "TESTE motivo")))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString());
+
+        String existingCode = created.path("code").asText();
+        String invalidToken = "TESTE-token-invalido";
+        String wrongTokenBody = mockMvc.perform(get("/api/v1/helpdesk/tickets/{code}", existingCode)
+                .header("X-Ticket-Token", invalidToken))
+            .andExpect(status().isNotFound())
+            .andReturn().getResponse().getContentAsString();
+        String missingCodeBody = mockMvc.perform(get("/api/v1/helpdesk/tickets/{code}", "HD-00000000000000000000000000")
+                .header("X-Ticket-Token", invalidToken))
+            .andExpect(status().isNotFound())
+            .andReturn().getResponse().getContentAsString();
+        assertEquals(wrongTokenBody, missingCodeBody);
+        assertEquals("{\"code\":\"TICKET_NOT_FOUND\",\"message\":\"Ticket não encontrado ou chave inválida.\"}",
+            wrongTokenBody);
+    }
+
+    @Test
+    void publicThreadStartsWithTheMostRecentMessagesInSequenceOrder() throws Exception {
+        String email = "teste-thread-" + UUID.randomUUID() + "@example.invalid";
+        JsonNode created = objectMapper.readTree(mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .with(request -> {
+                    request.setRemoteAddr("198.51.100.76");
+                    return request;
+                })
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(helpdeskRequest(email, "TESTE assunto", "TESTE motivo inicial")))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString());
+
+        String code = created.path("code").asText();
+        String token = created.path("token").asText();
+        for (int index = 1; index <= 101; index++) {
+            mockMvc.perform(post("/api/v1/helpdesk/tickets/{code}/messages", code)
+                    .header("X-Ticket-Token", token)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"body\":\"TESTE resposta " + index + "\"}"))
+                .andExpect(status().isOk());
+        }
+
+        JsonNode thread = objectMapper.readTree(mockMvc.perform(get("/api/v1/helpdesk/tickets/{code}", code)
+                .header("X-Ticket-Token", token))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString());
+        JsonNode messages = thread.path("messages");
+        assertEquals(100, messages.size());
+        assertEquals(3L, messages.get(0).path("seq").asLong());
+        assertEquals(102L, messages.get(99).path("seq").asLong());
+    }
+
+    @Test
+    void limitsAcceptedTicketsByEmailAndReturnsRetryAfter() throws Exception {
+        String email = "teste-limite-" + UUID.randomUUID() + "@example.invalid";
+        String remoteAddress = "198.51.100.74";
+        for (int index = 0; index < 5; index++) {
+            mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                    .with(request -> {
+                        request.setRemoteAddr(remoteAddress);
+                        return request;
+                    })
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(helpdeskRequest(email, "TESTE assunto " + index, "TESTE motivo")))
+                .andExpect(status().isCreated());
+        }
+
+        mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .with(request -> {
+                    request.setRemoteAddr(remoteAddress);
+                    return request;
+                })
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(helpdeskRequest(email, "TESTE assunto final", "TESTE motivo")))
+            .andExpect(status().isTooManyRequests())
+            .andExpect(jsonPath("$.code").value("RATE_LIMIT_EMAIL_EXCEEDED"))
+            .andExpect(header().exists("Retry-After"));
+    }
+
+    @Test
+    void enforcesClaimReplyResolveAndReopenTransitions() throws Exception {
+        String email = "teste-transicao-" + UUID.randomUUID() + "@example.invalid";
+        JsonNode created = objectMapper.readTree(mockMvc.perform(post("/api/v1/helpdesk/tickets")
+                .with(request -> {
+                    request.setRemoteAddr("198.51.100.75");
+                    return request;
+                })
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(helpdeskRequest(email, "TESTE assunto", "TESTE inicial")))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString());
+        String code = created.path("code").asText();
+        String token = created.path("token").asText();
+        HelpdeskTicket ticket = helpdeskTicketRepository.findByPublicCode(code).orElseThrow();
+
+        String staffEmail = "teste-staff-" + UUID.randomUUID() + "@example.invalid";
+        Usuario staff = new Usuario();
+        staff.setNomeCompleto("TESTE equipe");
+        staff.setEmail(staffEmail);
+        staff.setIdPerfil(3);
+        staff.setAtivo(true);
+        usuarioRepository.saveAndFlush(staff);
+
+        mockMvc.perform(post("/api/v1/helpdesk/staff/tickets/{id}/claim", ticket.getId())
+                .with(user(staffEmail).roles("STAFF")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("EM_ATENDIMENTO"));
+        mockMvc.perform(post("/api/v1/helpdesk/staff/tickets/{id}/messages", ticket.getId())
+                .with(user(staffEmail).roles("STAFF"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"body\":\"TESTE resposta da equipe\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("AGUARDANDO_CLIENTE"));
+        mockMvc.perform(post("/api/v1/helpdesk/tickets/{code}/messages", code)
+                .header("X-Ticket-Token", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"body\":\"TESTE resposta do cliente\"}"))
+            .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/helpdesk/staff/tickets/{id}/resolve", ticket.getId())
+                .with(user(staffEmail).roles("STAFF")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("RESOLVIDO"));
+        mockMvc.perform(post("/api/v1/helpdesk/tickets/{code}/messages", code)
+                .header("X-Ticket-Token", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"body\":\"TESTE reabertura do cliente\"}"))
+            .andExpect(status().isOk());
+
+        List<HelpdeskStatusHistory> history =
+            helpdeskStatusHistoryRepository.findAllByTicket(ticket.getId(), org.springframework.data.domain.PageRequest.of(0, 20));
+        assertEquals(List.of("ABERTO", "EM_ATENDIMENTO", "AGUARDANDO_CLIENTE", "EM_ATENDIMENTO", "RESOLVIDO", "REABERTO"),
+            history.stream().map(HelpdeskStatusHistory::getToStatus).toList());
+        assertEquals(List.of("TICKET_CREATED", "STAFF_CLAIM", "STAFF_REPLY", "CLIENT_REPLY",
+                "STAFF_RESOLVED", "CLIENT_REPLY_AFTER_RESOLUTION"),
+            history.stream().map(HelpdeskStatusHistory::getReasonCode).toList());
+    }
+
+    @Test
+    void restrictsStaffQueueFromSpaceManagerAndRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/helpdesk/staff/queue")
+                .with(user("teste-gestor").roles("GESTOR_ESPACOS")))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        mockMvc.perform(get("/api/v1/helpdesk/staff/queue"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+    }
+
+    private String helpdeskRequest(String email, String subject, String motivo) throws Exception {
+        return objectMapper.writeValueAsString(Map.of(
+            "name", "TESTE Solicitante",
+            "email", email,
+            "subject", subject,
+            "motivo", motivo
+        ));
+    }
 
 }

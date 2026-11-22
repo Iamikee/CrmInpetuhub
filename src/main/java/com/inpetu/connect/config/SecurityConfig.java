@@ -1,6 +1,7 @@
 package com.inpetu.connect.config;
 
 import com.inpetu.connect.repository.UsuarioRepository;
+import com.inpetu.connect.dto.HelpdeskErrorResponse;
 import com.inpetu.connect.security.JwtAuthenticationFilter;
 import com.inpetu.connect.security.SenhaTemporariaFilter;
 import com.inpetu.connect.security.TestDatabaseHeaderFilter;
@@ -63,6 +64,11 @@ public class SecurityConfig {
                 auth.requestMatchers("/api/v1/config").permitAll();
                 optionalFeatureRoutes.forEach(matcher -> auth.requestMatchers(matcher).permitAll());
                 auth.requestMatchers(HttpMethod.GET, "/api/v1/espacos/**", "/api/v1/ecossistema", "/api/v1/ecossistema/*/logo").permitAll();
+                auth.requestMatchers("/api/v1/helpdesk/staff/**").hasAnyRole("COORDENADOR", "STAFF");
+                auth.requestMatchers(HttpMethod.POST, "/api/v1/helpdesk/tickets",
+                    "/api/v1/helpdesk/tickets/*/messages").permitAll();
+                auth.requestMatchers(HttpMethod.GET, "/api/v1/helpdesk/tickets/*",
+                    "/api/v1/helpdesk/tickets/*/messages").permitAll();
                 auth.requestMatchers(HttpMethod.POST, "/api/v1/duvidas").permitAll();
                 auth.requestMatchers("/confirmar", "/verificar-email", "/paineladm").permitAll();
                 auth.requestMatchers("/api/v1/dev/email-preview").permitAll();
@@ -71,21 +77,27 @@ public class SecurityConfig {
             });
         return authorization.exceptionHandling(exceptions -> exceptions
                 .authenticationEntryPoint((request, response, exception) -> writeSecurityError(
-                    response, objectMapper, HttpStatus.UNAUTHORIZED,
+                    request, response, objectMapper, HttpStatus.UNAUTHORIZED,
                     "SESSAO_EXPIRADA", "Sua sessão expirou. Entre novamente."))
                 .accessDeniedHandler((request, response, exception) -> writeSecurityError(
-                    response, objectMapper, HttpStatus.FORBIDDEN,
+                    request, response, objectMapper, HttpStatus.FORBIDDEN,
                     "SEM_PERMISSAO", "Você não tem permissão para esta ação.")))
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterAfter(temporaryPasswordFilter, JwtAuthenticationFilter.class)
             .addFilterAfter(new TestDatabaseHeaderFilter(), JwtAuthenticationFilter.class).build();
     }
-    private static void writeSecurityError(jakarta.servlet.http.HttpServletResponse response,
+    private static void writeSecurityError(jakarta.servlet.http.HttpServletRequest request,
+                                           jakarta.servlet.http.HttpServletResponse response,
                                            ObjectMapper objectMapper, HttpStatus status,
                                            String code, String message) throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
+        if (request.getRequestURI().startsWith("/api/v1/helpdesk/staff/")) {
+            objectMapper.writeValue(response.getOutputStream(), new HelpdeskErrorResponse(
+                status == HttpStatus.UNAUTHORIZED ? "AUTHENTICATION_REQUIRED" : "FORBIDDEN", message));
+            return;
+        }
         objectMapper.writeValue(response.getOutputStream(), Map.of("codigo", code, "mensagem", message));
     }
     @Bean CorsConfigurationSource corsConfigurationSource(@Value("${app.cors.allowed-origin}") String origins) {
@@ -95,7 +107,8 @@ public class SecurityConfig {
             .distinct()
             .toList();
         CorsConfiguration config = new CorsConfiguration(); config.setAllowedOrigins(allowedOrigins); config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Database"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Database",
+            "Idempotency-Key", "X-Ticket-Token"));
         config.setExposedHeaders(List.of(HttpHeaders.RETRY_AFTER)); config.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource(); source.registerCorsConfiguration("/**", config); return source;
     }
