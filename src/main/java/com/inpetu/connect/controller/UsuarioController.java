@@ -66,13 +66,12 @@ public class UsuarioController {
     private final UsuarioFotoRepository fotos;
     private final JwtService jwt;
     private final UserDetailsService userDetailsService;
-    @org.springframework.beans.factory.annotation.Autowired
-    private EmailSender emailSender;
+    private final EmailSender emailSender;
     @Value("${app.cookie.secure:true}")
     private boolean cookieSecure = true;
     public UsuarioController(UsuarioRepository usuarios, LogAuditoriaRepository auditoria,
             OrganizacaoRepository organizacoes, DuvidaAtendimentoRepository duvidas, PasswordEncoder passwordEncoder,
-            UsuarioFotoRepository fotos, JwtService jwt, UserDetailsService userDetailsService) {
+            UsuarioFotoRepository fotos, JwtService jwt, UserDetailsService userDetailsService, EmailSender emailSender) {
         this.usuarios = usuarios;
         this.auditoria = auditoria;
         this.organizacoes = organizacoes;
@@ -81,6 +80,7 @@ public class UsuarioController {
         this.fotos = fotos;
         this.jwt = jwt;
         this.userDetailsService = userDetailsService;
+        this.emailSender = emailSender;
     }
 
     @GetMapping("/me")
@@ -439,7 +439,8 @@ public class UsuarioController {
         alvo.setCodigoPromocaoExpiraEm(LocalDateTime.now().plusMinutes(10));
         alvo.setTentativasPromocao(0);
         usuarios.save(alvo);
-        emailSender.sendProfilePromotionCode(alvo.getEmail(), alvo.getNomeCompleto(), codigo, 10);
+        emailSender.sendProfilePromotionCode(chamador.getEmail(), chamador.getNomeCompleto(),
+                codigo, 10, alvo.getNomeCompleto());
         return Map.of("mensagem", "Código enviado por e-mail.");
     }
 
@@ -502,10 +503,22 @@ public class UsuarioController {
         return Map.of("documento", usuario.getCpfDocumento());
     }
 
-    @PatchMapping("/{id}/status") @PreAuthorize("hasRole('COORDENADOR')")
+    @PatchMapping("/{id}/status") @PreAuthorize("hasRole('COORDENADOR')") @Transactional
     public UsuarioResumo status(@PathVariable Integer id, @RequestBody Map<String, Boolean> body, Authentication auth) {
+        Usuario responsavel = usuarioAutenticado(auth);
         Usuario usuario = usuarios.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado."));
-        usuario.setAtivo(Boolean.TRUE.equals(body.get("ativo"))); Usuario salvo = usuarios.save(usuario);
+        boolean ativo = Boolean.TRUE.equals(body.get("ativo"));
+        if (!ativo && usuario.getIdUsuario().equals(responsavel.getIdUsuario())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você não pode inativar sua própria conta.");
+        }
+        if (!ativo && Integer.valueOf(5).equals(usuario.getIdPerfil())
+                && !Integer.valueOf(5).equals(responsavel.getIdPerfil())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Somente um Desenvolvedor / Admin pode inativar uma conta de Desenvolvedor / Admin.");
+        }
+        usuario.setAtivo(ativo);
+        if (!ativo) usuario.setVersaoToken((usuario.getVersaoToken() == null ? 0 : usuario.getVersaoToken()) + 1);
+        Usuario salvo = usuarios.save(usuario);
         registrar("usuario", id, "ALTERACAO_STATUS", "Ativo: " + salvo.getAtivo(), auth.getName());
         return resumo(salvo);
     }

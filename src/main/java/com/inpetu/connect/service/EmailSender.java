@@ -9,5 +9,6 @@ public interface EmailSender {
 
     void sendPasswordResetCode(String email, String name, String code, int validityMinutes);
 
-    default void sendProfilePromotionCode(String email, String name, String code, int validityMinutes) {}
+    default void sendProfilePromotionCode(String email, String name, String code, int validityMinutes,
+                                          String targetName) {}
 }

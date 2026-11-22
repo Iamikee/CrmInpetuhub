@@ -206,6 +206,39 @@ class UsuarioControllerTest {
     }
 
     @Test
+    void codigoPromocaoVaiParaChamadorEIdentificaAlvo() {
+        Usuario desenvolvedor = new Usuario();
+        desenvolvedor.setIdUsuario(1);
+        desenvolvedor.setEmail("dev@example.org");
+        desenvolvedor.setNomeCompleto("Dev Exemplo");
+        desenvolvedor.setIdPerfil(5);
+        Usuario alvo = new Usuario();
+        alvo.setIdUsuario(9);
+        alvo.setEmail("alvo@example.org");
+        alvo.setNomeCompleto("Joana Silva");
+        alvo.setIdPerfil(3);
+        when(authentication.getName()).thenReturn("dev@example.org");
+        when(usuarios.findByEmailIgnoreCase("dev@example.org")).thenReturn(Optional.of(desenvolvedor));
+        when(usuarios.findById(9)).thenReturn(Optional.of(alvo));
+        when(usuarios.save(alvo)).thenReturn(alvo);
+
+        controller.solicitarPromocaoDesenvolvedor(9, authentication);
+
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendProfilePromotionCode(
+                org.mockito.ArgumentMatchers.eq("dev@example.org"),
+                org.mockito.ArgumentMatchers.eq("Dev Exemplo"),
+                code.capture(),
+                org.mockito.ArgumentMatchers.eq(10),
+                org.mockito.ArgumentMatchers.eq("Joana Silva"));
+        assertTrue(code.getValue().matches("\\d{6}"));
+        verifyNoMoreInteractions(emailSender);
+        assertNotNull(alvo.getCodigoPromocaoHash());
+        assertTrue(alvo.getCodigoPromocaoExpiraEm().isAfter(LocalDateTime.now()));
+        assertEquals(0, alvo.getTentativasPromocao());
+    }
+
+    @Test
     void coordenadorNaoPodeDefinirPerfil5PorAlteracaoGenerica() {
         Usuario alvo = new Usuario();
         alvo.setIdUsuario(9);
@@ -270,6 +303,76 @@ class UsuarioControllerTest {
         assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
         verify(usuarios, never()).save(any());
         verifyNoInteractions(auditoria);
+    }
+
+    @Test
+    void naoPermiteInativarPropriaConta() {
+        Usuario coordenador = new Usuario();
+        coordenador.setIdUsuario(1);
+        coordenador.setEmail("coord@example.org");
+        coordenador.setIdPerfil(1);
+        coordenador.setAtivo(true);
+        when(authentication.getName()).thenReturn("coord@example.org");
+        when(usuarios.findByEmailIgnoreCase("coord@example.org")).thenReturn(Optional.of(coordenador));
+        when(usuarios.findById(1)).thenReturn(Optional.of(coordenador));
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+            () -> controller.status(1, java.util.Map.of("ativo", false), authentication));
+
+        assertEquals(HttpStatus.FORBIDDEN, error.getStatusCode());
+        assertEquals("Você não pode inativar sua própria conta.", error.getReason());
+        verify(usuarios, never()).save(any());
+        verifyNoInteractions(auditoria);
+    }
+
+    @Test
+    void coordenadorNaoPodeInativarContaDeDesenvolvedor() {
+        Usuario coordenador = new Usuario();
+        coordenador.setIdUsuario(1);
+        coordenador.setEmail("coord@example.org");
+        coordenador.setIdPerfil(1);
+        Usuario desenvolvedor = new Usuario();
+        desenvolvedor.setIdUsuario(5);
+        desenvolvedor.setIdPerfil(5);
+        desenvolvedor.setAtivo(true);
+        when(authentication.getName()).thenReturn("coord@example.org");
+        when(usuarios.findByEmailIgnoreCase("coord@example.org")).thenReturn(Optional.of(coordenador));
+        when(usuarios.findById(5)).thenReturn(Optional.of(desenvolvedor));
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+            () -> controller.status(5, java.util.Map.of("ativo", false), authentication));
+
+        assertEquals(HttpStatus.FORBIDDEN, error.getStatusCode());
+        assertEquals("Somente um Desenvolvedor / Admin pode inativar uma conta de Desenvolvedor / Admin.",
+                error.getReason());
+        verify(usuarios, never()).save(any());
+        verifyNoInteractions(auditoria);
+    }
+
+    @Test
+    void inativarContaDaEquipeInvalidaSessoesERegistraAuditoria() {
+        Usuario coordenador = new Usuario();
+        coordenador.setIdUsuario(1);
+        coordenador.setEmail("coord@example.org");
+        coordenador.setIdPerfil(1);
+        Usuario staff = new Usuario();
+        staff.setIdUsuario(3);
+        staff.setIdPerfil(3);
+        staff.setAtivo(true);
+        staff.setVersaoToken(2);
+        when(authentication.getName()).thenReturn("coord@example.org");
+        when(usuarios.findByEmailIgnoreCase("coord@example.org")).thenReturn(Optional.of(coordenador));
+        when(usuarios.findById(3)).thenReturn(Optional.of(staff));
+        when(usuarios.save(staff)).thenReturn(staff);
+
+        UsuarioResumo result = controller.status(3, java.util.Map.of("ativo", false), authentication);
+
+        assertFalse(result.ativo());
+        assertFalse(staff.getAtivo());
+        assertEquals(3, staff.getVersaoToken());
+        ArgumentCaptor<LogAuditoria> log = ArgumentCaptor.forClass(LogAuditoria.class);
+        verify(auditoria).save(log.capture());
+        assertEquals("ALTERACAO_STATUS", log.getValue().getAcao());
     }
 
     @Test

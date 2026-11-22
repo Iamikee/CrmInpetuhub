@@ -12,6 +12,7 @@ describe('client profile dialog', () => {
     render(<ClientProfileDialog
       client={{
         idUsuario: 12,
+        idPerfil: 4,
         nomeCompleto: 'Pessoa de teste',
         email: 'pessoa@example.invalid',
         telefone: '+5548991234567',
@@ -48,6 +49,7 @@ describe('client profile dialog', () => {
     render(<ClientProfileDialog
       client={{
         idUsuario: 12,
+        idPerfil: 4,
         nomeCompleto: 'Pessoa de teste',
         email: 'pessoa@example.invalid',
         telefone: '+5548991234567',
@@ -179,6 +181,95 @@ describe('client profile dialog', () => {
     expect(onRole).toHaveBeenCalledWith(client, 4)
     expect(await within(dialog).findByText('Perfil de acesso atualizado. A pessoa deverá entrar novamente.')).toBeTruthy()
     expect(within(dialog).getByText('Solicitante')).toBeTruthy()
+  })
+
+  it('lets the team deactivate an active profile 3 account after confirming its identity', async () => {
+    const client = {
+      idUsuario: 12,
+      idPerfil: 3,
+      nomeCompleto: 'Pessoa de teste',
+      email: 'pessoa@example.invalid',
+      ativo: true,
+    }
+    const onStatus = vi.fn().mockResolvedValue({ ...client, ativo: false })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<ClientProfileDialog
+      client={client}
+      reservations={[]}
+      tickets={[]}
+      auditItems={[]}
+      close={vi.fn()}
+      onSave={vi.fn()}
+      onPersona={vi.fn()}
+      canManageStatus
+      currentUserId={1}
+      onStatus={onStatus}
+    />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Pessoa de teste' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Inativar acesso' }))
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      'Inativar o acesso de Pessoa de teste (pessoa@example.invalid)?',
+    )
+    expect(onStatus).toHaveBeenCalledWith(client, false)
+    expect(await within(dialog).findByText('Cadastro inativo')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Reativar acesso' })).toBeTruthy()
+  })
+
+  it('shows reactivation for an inactive profile 3 account', async () => {
+    const client = {
+      idUsuario: 12,
+      idPerfil: 3,
+      nomeCompleto: 'Pessoa de teste',
+      email: 'pessoa@example.invalid',
+      ativo: false,
+    }
+    const onStatus = vi.fn().mockResolvedValue({ ...client, ativo: true })
+
+    render(<ClientProfileDialog
+      client={client}
+      reservations={[]}
+      tickets={[]}
+      auditItems={[]}
+      close={vi.fn()}
+      onSave={vi.fn()}
+      onPersona={vi.fn()}
+      canManageStatus
+      currentUserId={1}
+      onStatus={onStatus}
+    />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Pessoa de teste' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reativar acesso' }))
+
+    expect(onStatus).toHaveBeenCalledWith(client, true)
+    expect(await within(dialog).findByText('Cadastro ativo')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Inativar acesso' })).toBeTruthy()
+  })
+
+  it.each([
+    ['the current account', { idUsuario: 1, idPerfil: 3 }, 1],
+    ['a profile 4 account', { idUsuario: 12, idPerfil: 4 }, 1],
+    ['a profile 5 account', { idUsuario: 12, idPerfil: 5 }, 1],
+  ])('does not show access status controls for %s', async (_description, identity, currentUserId) => {
+    render(<ClientProfileDialog
+      client={{ ...identity, nomeCompleto: 'Pessoa de teste', email: 'pessoa@example.invalid', ativo: true }}
+      reservations={[]}
+      tickets={[]}
+      auditItems={[]}
+      close={vi.fn()}
+      onSave={vi.fn()}
+      onPersona={vi.fn()}
+      canManageStatus
+      currentUserId={currentUserId}
+      onStatus={vi.fn()}
+    />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Pessoa de teste' })
+    expect(within(dialog).queryByRole('button', { name: 'Inativar acesso' })).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: 'Reativar acesso' })).toBeNull()
   })
 
   it('blocks invalid client edits and normalizes name and email before saving', async () => {

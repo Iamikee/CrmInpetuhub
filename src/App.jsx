@@ -1612,7 +1612,7 @@ function PersonaCombobox({ value, onChange }) {
     </div>
   </Combobox>
 }
-export function ClientProfileDialog({ client, reservations, tickets, auditItems, close, onSave, onPersona, onRole, canManageRole, onDeactivate, canDeactivate, canResetPassword, onResetPassword }) {
+export function ClientProfileDialog({ client, reservations, tickets, auditItems, close, onSave, onPersona, onRole, canManageRole, onDeactivate, canDeactivate, canManageStatus, currentUserId, onStatus, canResetPassword, onResetPassword }) {
   const [tab, setTab] = useState('Dados gerais')
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({
@@ -1636,6 +1636,9 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   const [deactivationReason, setDeactivationReason] = useState('')
   const [deactivationBusy, setDeactivationBusy] = useState(false)
   const [deactivationError, setDeactivationError] = useState('')
+  const [accountActive, setAccountActive] = useState(client?.ativo !== false)
+  const [statusBusy, setStatusBusy] = useState(false)
+  const [statusError, setStatusError] = useState('')
   const [resetOpen, setResetOpen] = useState(false)
   const [generatePassword, setGeneratePassword] = useState(true)
   const [manualPassword, setManualPassword] = useState('')
@@ -1643,6 +1646,9 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
   const [resetError, setResetError] = useState('')
   const [resetResult, setResetResult] = useState('')
   if (!client) return null
+  const canManageAccountStatus = canManageStatus && currentUserId != null
+    && Number(client.idUsuario) !== Number(currentUserId)
+    && [1, 2, 3].includes(Number(client.idPerfil))
   const persona = personas[client.idPersona]
   const clientReservations = reservations.filter(item => item.idSolicitante === client.idUsuario)
     .sort((left, right) => right.dataReserva.localeCompare(left.dataReserva))
@@ -1667,7 +1673,7 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
     ['Organização', form.organizacao || 'Não informada'],
     ['Vínculo / cargo', form.cargoVinculo || 'Não informado'],
     ['Data de cadastro', client.dataCadastro ? new Date(client.dataCadastro).toLocaleString('pt-BR') : ','],
-    ['Status', client.ativo === false ? 'Inativo' : 'Ativo'],
+    ['Status', accountActive ? 'Ativo' : 'Inativo'],
   ]
   async function save(event) {
     event.preventDefault()
@@ -1736,6 +1742,21 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
       setDeactivationBusy(false)
     }
   }
+  async function changeAccountStatus() {
+    if (statusBusy) return
+    const ativo = !accountActive
+    if (!ativo && !window.confirm(`Inativar o acesso de ${client.nomeCompleto} (${client.email})?`)) return
+    setStatusBusy(true)
+    setStatusError('')
+    try {
+      const updated = await onStatus(client, ativo)
+      setAccountActive(updated?.ativo ?? ativo)
+    } catch (statusFailure) {
+      setStatusError(statusFailure.message || 'Não foi possível atualizar o acesso desta conta.')
+    } finally {
+      setStatusBusy(false)
+    }
+  }
   async function resetPassword(event) {
     event.preventDefault()
     setResetError('')
@@ -1752,7 +1773,7 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
     } catch (resetFailure) { setResetError(resetFailure.message) } finally { setResetBusy(false) }
   }
   return <Modal open={Boolean(client)} close={close} title={client.nomeCompleto} wide>
-    <div className="client-profile-heading"><Avatar user={client} nome={client.nomeCompleto} tamanho={48} className="client-profile-avatar" /><div><p className="client-profile-intro">Ficha do usuário · dados e histórico</p><span className={`client-profile-status ${client.ativo === false ? 'client-profile-inactive' : ''}`}><i />{client.ativo === false ? 'Cadastro inativo' : 'Cadastro ativo'}</span></div></div>
+    <div className="client-profile-heading"><Avatar user={client} nome={client.nomeCompleto} tamanho={48} className="client-profile-avatar" /><div><p className="client-profile-intro">Ficha do usuário · dados e histórico</p><span className={`client-profile-status ${accountActive ? '' : 'client-profile-inactive'}`}><i />{accountActive ? 'Cadastro ativo' : 'Cadastro inativo'}</span></div></div>
     <div className="client-profile-tabs" role="tablist" aria-label="Seções da ficha do usuário">
       {clientProfileTabs.map(({ name, id, count }) => (
         <button key={name} id={`client-profile-tab-${id}`} type="button" role="tab" aria-controls={`client-profile-panel-${id}`} aria-selected={tab === name} className={tab === name ? 'client-profile-tab-active' : ''} onClick={() => setTab(name)}>
@@ -1808,7 +1829,12 @@ export function ClientProfileDialog({ client, reservations, tickets, auditItems,
               : <><button type="button" className="client-profile-action" onClick={() => { setEditing(true); setError(''); setPhoneSubmitAttempted(false); setIdentityTouched({}) }}>Editar dados</button>{canResetPassword && <button type="button" className="client-profile-action" onClick={() => { setResetResult(''); setResetOpen(true); setResetError('') }}>Redefinir senha</button>}</>}
           </div>
         </form>
-        {canDeactivate && client.ativo !== false && <section className="client-profile-deactivation">
+        {canManageAccountStatus && <section className="client-profile-status-action" aria-label="Status do acesso">
+          <div><strong>Acesso à conta</strong><small>O status de acesso pode ser alterado sem excluir o cadastro nem o histórico.</small></div>
+          {statusError && <p className="form-message" role="alert">{statusError}</p>}
+          <button type="button" className={`client-profile-action ${accountActive ? 'client-profile-action-danger' : ''}`} disabled={statusBusy} onClick={changeAccountStatus}>{statusBusy ? 'Salvando...' : accountActive ? 'Inativar acesso' : 'Reativar acesso'}</button>
+        </section>}
+        {canDeactivate && Number(client.idPerfil) === 4 && accountActive && <section className="client-profile-deactivation">
           {deactivationOpen ? <form onSubmit={deactivate}><div><strong>Desativar cadastro</strong><small>O acesso será desativado; reservas e histórico serão preservados.</small></div><label>Motivo<textarea required rows="3" maxLength={1000} value={deactivationReason} onChange={event => { setDeactivationReason(event.target.value); setDeactivationError('') }} /></label>{deactivationError && <p className="form-message" role="alert">{deactivationError}</p>}<div className="client-profile-actions"><button type="button" className="client-profile-action client-profile-action-muted" disabled={deactivationBusy} onClick={() => { setDeactivationOpen(false); setDeactivationError('') }}>Voltar</button><button type="submit" className="client-profile-action client-profile-action-danger" disabled={!deactivationReason.trim() || deactivationBusy}>{deactivationBusy ? 'Desativando...' : 'Confirmar desativação'}</button></div></form> : <button type="button" className="client-profile-action client-profile-action-danger" onClick={() => setDeactivationOpen(true)}>Desativar cadastro</button>}
         </section>}
       </>}
