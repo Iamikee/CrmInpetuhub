@@ -21,4 +21,9 @@ public class Usuario {
     @Column(name = "versao_token", nullable = false, columnDefinition = "integer not null default 0")
     private Integer versaoToken = 0;
     @Column(name = "data_cadastro", nullable = false) private LocalDateTime dataCadastro = LocalDateTime.now();
+    @Column(name = "cpf_documento", length = 14, unique = true) private String cpfDocumento;
+    @Column(name = "codigo_promocao_hash", length = 64) private String codigoPromocaoHash;
+    @Column(name = "codigo_promocao_expira_em") private LocalDateTime codigoPromocaoExpiraEm;
+    @Column(name = "tentativas_promocao", nullable = false, columnDefinition = "integer not null default 0")
+    private Integer tentativasPromocao = 0;
 }

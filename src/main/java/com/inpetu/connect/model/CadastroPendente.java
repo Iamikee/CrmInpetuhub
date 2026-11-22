@@ -61,4 +61,7 @@ public class CadastroPendente {
 
     @Column(name = "tentativas", nullable = false, columnDefinition = "integer not null default 0")
     private Integer tentativas = 0;
+    @Column(name = "tipo_documento", length = 2) private String tipoDocumento;
+    @Column(name = "cpf_documento", length = 14) private String cpfDocumento;
+    @Column(name = "cnpj_documento", length = 18) private String cnpjDocumento;
 }

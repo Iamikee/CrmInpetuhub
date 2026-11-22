@@ -36,6 +36,9 @@ public class SecurityConfig {
     @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
     @Bean UserDetailsService userDetailsService(UsuarioRepository usuarios) {
         return email -> usuarios.findByEmail(email).filter(u -> Boolean.TRUE.equals(u.getAtivo())).map(u -> {
+            if (u.getIdPerfil() != null && u.getIdPerfil() == 5) {
+                return User.withUsername(u.getEmail()).password(u.getSenhaHash() == null ? "{noop}disabled" : u.getSenhaHash()).roles("COORDENADOR", "DESENVOLVEDOR").build();
+            }
             String role = switch (u.getIdPerfil()) { case 1 -> "COORDENADOR"; case 2 -> "GESTOR_ESPACOS"; case 3 -> "STAFF"; default -> "SOLICITANTE"; };
             return User.withUsername(u.getEmail()).password(u.getSenhaHash() == null ? "{noop}disabled" : u.getSenhaHash()).roles(role).build();
         }).orElseThrow(() -> new UsernameNotFoundException("Usuário não encontrado"));

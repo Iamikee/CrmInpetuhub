@@ -38,6 +38,45 @@ export function validateEmail(value) {
   return pattern.test(email) ? '' : 'E-mail inválido'
 }
 
+export function sanitizeCpfCnpj(value) {
+  return String(value ?? '').replace(/\D/g, '')
+}
+
+export function maskCpfCnpj(value) {
+  const clean = sanitizeCpfCnpj(value)
+  if (clean.length === 11) return `***.***.${clean.slice(6, 9)}-${clean.slice(9)}`
+  if (clean.length === 14) return `**.${clean.slice(2, 5)}.${clean.slice(5, 8)}/${clean.slice(8, 12)}-**`
+  return clean ? '***.***.***-**' : ''
+}
+
+export function validateCpf(value) {
+  const cpf = sanitizeCpfCnpj(value)
+  if (!/^\d{11}$/.test(cpf) || /^(\d)\1{10}$/.test(cpf)) return 'CPF inválido'
+  const digit = (digits, length) => {
+    let sum = 0
+    for (let i = 0; i < length; i++) sum += Number(digits[i]) * (length + 1 - i)
+    const rest = (sum * 10) % 11
+    return rest === 10 ? 0 : rest
+  }
+  return digit(cpf, 9) === Number(cpf[9]) && digit(cpf, 10) === Number(cpf[10]) ? '' : 'CPF inválido'
+}
+
+export function validateCnpj(value) {
+  const cnpj = sanitizeCpfCnpj(value)
+  if (!/^\d{14}$/.test(cnpj) || /^(\d)\1{13}$/.test(cnpj)) return 'CNPJ inválido'
+  const digit = (input, length) => {
+    let sum = 0
+    let weight = length === 12 ? 5 : 6
+    for (let i = 0; i < length; i++) {
+      sum += Number(input[i]) * weight
+      weight = weight === 2 ? 9 : weight - 1
+    }
+    const rest = sum % 11
+    return rest < 2 ? 0 : 11 - rest
+  }
+  return digit(cnpj, 12) === Number(cnpj[12]) && digit(cnpj, 13) === Number(cnpj[13]) ? '' : 'CNPJ inválido'
+}
+
 export function validateOrganization(value) {
   const organization = String(value ?? '').trim()
   if (!organization) return 'Informe a organização'

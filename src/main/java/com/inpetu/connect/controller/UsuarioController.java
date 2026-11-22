@@ -47,9 +47,11 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.security.SecureRandom;
 import com.inpetu.connect.dto.PersonaResumo;
 import com.inpetu.connect.util.TelefoneUtils;
+import com.inpetu.connect.service.EmailSender;
 
 @RestController @RequestMapping("/api/v1/usuarios")
 public class UsuarioController {
@@ -64,6 +66,8 @@ public class UsuarioController {
     private final UsuarioFotoRepository fotos;
     private final JwtService jwt;
     private final UserDetailsService userDetailsService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private EmailSender emailSender;
     @Value("${app.cookie.secure:true}")
     private boolean cookieSecure = true;
     public UsuarioController(UsuarioRepository usuarios, LogAuditoriaRepository auditoria,
@@ -86,17 +90,19 @@ public class UsuarioController {
         Organizacao organizacao = usuario.getIdOrganizacao() == null ? null
                 : organizacoes.findById(usuario.getIdOrganizacao()).orElse(null);
         UsuarioFoto foto = fotos.findById(usuario.getIdUsuario()).orElse(null);
-        return Map.of(
-                "idUsuario", usuario.getIdUsuario(),
-                "nomeCompleto", usuario.getNomeCompleto(),
-                "email", usuario.getEmail(),
-                "telefone", usuario.getTelefone() == null ? "" : usuario.getTelefone(),
-                "cargoVinculo", usuario.getCargoVinculo() == null ? "" : usuario.getCargoVinculo(),
-                "organizacao", organizacao == null ? "" : organizacao.getNomeOrganizacao(),
-                "perfil", usuario.getIdPerfil(),
-                "senhaTemporaria", Boolean.TRUE.equals(usuario.getSenhaTemporaria()),
-                "temFoto", foto != null,
-                "fotoVersao", foto == null ? 0L : foto.getAtualizadaEm().toInstant(ZoneOffset.UTC).toEpochMilli());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("idUsuario", usuario.getIdUsuario());
+        payload.put("nomeCompleto", usuario.getNomeCompleto());
+        payload.put("email", usuario.getEmail());
+        payload.put("telefone", usuario.getTelefone() == null ? "" : usuario.getTelefone());
+        payload.put("cargoVinculo", usuario.getCargoVinculo() == null ? "" : usuario.getCargoVinculo());
+        payload.put("organizacao", organizacao == null ? "" : organizacao.getNomeOrganizacao());
+        payload.put("perfil", usuario.getIdPerfil());
+        payload.put("cpfMascarado", maskCpf(usuario.getCpfDocumento()));
+        payload.put("senhaTemporaria", Boolean.TRUE.equals(usuario.getSenhaTemporaria()));
+        payload.put("temFoto", foto != null);
+        payload.put("fotoVersao", foto == null ? 0L : foto.getAtualizadaEm().toInstant(ZoneOffset.UTC).toEpochMilli());
+        return payload;
     }
 
     @PutMapping("/me")
@@ -410,6 +416,87 @@ public class UsuarioController {
         return resumo(salvo);
     }
 
+    @PostMapping("/{id}/promover-desenvolvedor")
+    @PreAuthorize("hasRole('DESENVOLVEDOR')")
+    @Transactional
+    public Map<String, String> solicitarPromocaoDesenvolvedor(@PathVariable Integer id, Authentication auth) {
+        Usuario chamador = usuarioAutenticado(auth);
+        if (!Integer.valueOf(5).equals(chamador.getIdPerfil())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Somente perfil Desenvolvedor pode promover.");
+        }
+        Usuario alvo = usuarios.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado."));
+        if (Integer.valueOf(5).equals(alvo.getIdPerfil())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este usuário já é Desenvolvedor.");
+        }
+        String codigo = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
+        alvo.setCodigoPromocaoHash(hashCodigoPromocao(codigo));
+        alvo.setCodigoPromocaoExpiraEm(LocalDateTime.now().plusMinutes(10));
+        alvo.setTentativasPromocao(0);
+        usuarios.save(alvo);
+        emailSender.sendProfilePromotionCode(alvo.getEmail(), alvo.getNomeCompleto(), codigo, 10);
+        return Map.of("mensagem", "Código enviado por e-mail.");
+    }
+
+    @PostMapping("/{id}/promover-desenvolvedor/confirmar")
+    @PreAuthorize("hasRole('DESENVOLVEDOR')")
+    @Transactional
+    public UsuarioResumo confirmarPromocaoDesenvolvedor(@PathVariable Integer id,
+            @RequestBody Map<String, String> body, Authentication auth) {
+        Usuario chamador = usuarioAutenticado(auth);
+        if (!Integer.valueOf(5).equals(chamador.getIdPerfil())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Somente perfil Desenvolvedor pode promover.");
+        }
+        Usuario alvo = usuarios.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado."));
+        String codigo = body.get("codigo");
+        if (codigo == null || !codigo.matches("\\d{6}")
+            || alvo.getCodigoPromocaoHash() == null
+            || alvo.getCodigoPromocaoExpiraEm() == null
+            || alvo.getCodigoPromocaoExpiraEm().isBefore(LocalDateTime.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Código inválido ou expirado.");
+        }
+        if (!MessageDigest.isEqual(
+                alvo.getCodigoPromocaoHash().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                hashCodigoPromocao(codigo).getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+            int tentativas = alvo.getTentativasPromocao() == null ? 0 : alvo.getTentativasPromocao();
+            alvo.setTentativasPromocao(tentativas + 1);
+            if (tentativas + 1 >= 5) {
+                alvo.setCodigoPromocaoHash(null);
+                alvo.setCodigoPromocaoExpiraEm(null);
+            }
+            usuarios.save(alvo);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Código inválido.");
+        }
+        registrar("usuario", id, "PROMOCAO_DESENVOLVEDOR",
+                "Perfil promovido para Desenvolvedor após confirmação por código.", auth.getName());
+        alvo.setIdPerfil(5);
+        alvo.setVersaoToken((alvo.getVersaoToken() == null ? 0 : alvo.getVersaoToken()) + 1);
+        alvo.setCodigoPromocaoHash(null);
+        alvo.setCodigoPromocaoExpiraEm(null);
+        alvo.setTentativasPromocao(0);
+        Usuario salvo = usuarios.save(alvo);
+        return resumo(salvo);
+    }
+
+    private String hashCodigoPromocao(String codigo) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return java.util.HexFormat.of().formatHex(digest.digest(codigo.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @GetMapping("/{id}/documento")
+    @PreAuthorize("hasRole('COORDENADOR')")
+    public Map<String, String> revelarDocumento(@PathVariable Integer id, Authentication auth) {
+        Usuario usuario = usuarios.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado."));
+        if (usuario.getCpfDocumento() == null) return Map.of("documento", "");
+        return Map.of("documento", usuario.getCpfDocumento());
+    }
+
     @PatchMapping("/{id}/status") @PreAuthorize("hasRole('COORDENADOR')")
     public UsuarioResumo status(@PathVariable Integer id, @RequestBody Map<String, Boolean> body, Authentication auth) {
         Usuario usuario = usuarios.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado."));
@@ -436,7 +523,12 @@ public class UsuarioController {
         return new UsuarioResumo(u.getIdUsuario(), u.getNomeCompleto(), u.getEmail(), u.getTelefone(),
                 u.getCargoVinculo(), u.getIdPerfil(), u.getIdOrganizacao(), u.getAtivo(),
                 u.getIdPersona(), u.getDataCadastro(), foto != null,
-                foto == null ? 0L : foto.getAtualizadaEm().toInstant(ZoneOffset.UTC).toEpochMilli());
+                foto == null ? 0L : foto.getAtualizadaEm().toInstant(ZoneOffset.UTC).toEpochMilli(),
+                maskCpf(u.getCpfDocumento()));
+    }
+    private String maskCpf(String cpf) {
+        if (cpf == null || cpf.length() != 11) return cpf == null ? "" : "***";
+        return "***.***." + cpf.substring(6, 9) + "-" + cpf.substring(9);
     }
     private String nomePerfil(Integer perfil) {
         return switch (perfil == null ? 0 : perfil) {
@@ -444,6 +536,7 @@ public class UsuarioController {
             case 2 -> "Gestor de Espaços";
             case 3 -> "Staff/Atendente";
             case 4 -> "Solicitante";
+            case 5 -> "Desenvolvedor / Admin";
             default -> "Desconhecido";
         };
     }
@@ -494,8 +587,11 @@ public class UsuarioController {
         return password.toString();
     }
     private void registrar(String tabela, Integer id, String acao, String detalhes, String email) {
-        Usuario responsavel = usuarios.findByEmail(email).orElseThrow();
+        Integer responsavelId = usuarios.findByEmailIgnoreCase(email)
+                .map(Usuario::getIdUsuario)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.FORBIDDEN, "Responsável pela ação não identificado."));
         LogAuditoria log = new LogAuditoria(); log.setTabelaAfetada(tabela); log.setIdRegistroAfetado(id); log.setAcao(acao);
-        log.setDetalhesAlteracao(detalhes); log.setIdUsuarioResponsavel(responsavel.getIdUsuario()); log.setDataHora(LocalDateTime.now()); auditoria.save(log);
+        log.setDetalhesAlteracao(detalhes); log.setIdUsuarioResponsavel(responsavelId); log.setDataHora(LocalDateTime.now()); auditoria.save(log);
     }
 }

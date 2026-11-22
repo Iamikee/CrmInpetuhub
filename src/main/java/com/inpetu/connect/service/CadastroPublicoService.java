@@ -132,6 +132,9 @@ public class CadastroPublicoService {
             pendente.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
             pendente.setCargoVinculo(request.cargoVinculo().trim());
             pendente.setNomeOrganizacao(request.organizacao().trim());
+            pendente.setTipoDocumento(request.tipoDocumento());
+            pendente.setCpfDocumento("PF".equals(request.tipoDocumento()) ? request.documento() : null);
+            pendente.setCnpjDocumento("PJ".equals(request.tipoDocumento()) ? request.documento() : null);
             pendente.setSenhaHash(passwordEncoder.encode(request.senha()));
             pendente.setTokenHash(hashToken(rawToken));
             pendente.setExpiraEm(now.plusMinutes(20));
@@ -146,6 +149,9 @@ public class CadastroPublicoService {
             pendente.setTelefone(TelefoneUtils.normalizarE164(request.telefone()));
             pendente.setCargoVinculo(request.cargoVinculo().trim());
             pendente.setNomeOrganizacao(request.organizacao().trim());
+            pendente.setTipoDocumento(request.tipoDocumento());
+            pendente.setCpfDocumento("PF".equals(request.tipoDocumento()) ? request.documento() : null);
+            pendente.setCnpjDocumento("PJ".equals(request.tipoDocumento()) ? request.documento() : null);
             pendente.setSenhaHash(passwordEncoder.encode(request.senha()));
             pendente.setTokenHash(hashToken(rawToken));
             pendente.setExpiraEm(now.plusMinutes(20));
@@ -354,9 +360,14 @@ public class CadastroPublicoService {
     }
 
     private Usuario efetivarCadastro(CadastroPendente pendente) {
+        if ("PF".equals(pendente.getTipoDocumento()) && pendente.getCpfDocumento() != null
+            && usuarios.findAll().stream().anyMatch(u -> pendente.getCpfDocumento().equals(u.getCpfDocumento()))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este CPF já está cadastrado.");
+        }
         Organizacao organizacao = new Organizacao();
         organizacao.setNomeOrganizacao(pendente.getNomeOrganizacao());
         organizacao.setTipoOrganizacao("Pendente de classificação");
+        organizacao.setCnpjDocumento(pendente.getCnpjDocumento());
         organizacao = organizacoes.save(organizacao);
 
         Usuario usuario = new Usuario();
@@ -369,6 +380,7 @@ public class CadastroPublicoService {
         usuario.setIdPersona(null);
         usuario.setIdOrganizacao(organizacao.getIdOrganizacao());
         usuario.setAtivo(true);
+        usuario.setCpfDocumento(pendente.getCpfDocumento());
         Usuario criado = usuarios.save(usuario);
         pendentes.delete(pendente);
         return criado;

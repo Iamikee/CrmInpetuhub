@@ -28,7 +28,36 @@ public class InitialAdminBootstrap {
         @Value("${app.bootstrap.admin.password:}") String password
     ) {
         return (ApplicationArguments args) -> {
-            if (usuarios.existsByIdPerfil(1)) return;
+            boolean developerExistente = usuarios.existsByIdPerfil(5);
+            boolean contaExistente = false;
+            if (!developerExistente && email != null && !email.isBlank()
+                    && password != null && !password.isBlank()) {
+                String developerEmail = email.trim();
+                if (usuarios.findByEmailIgnoreCase(developerEmail).isEmpty()) {
+                    if (password.length() < 12 || password.length() > 72) {
+                        throw new IllegalStateException("APP_ADMIN_PASSWORD deve conter entre 12 e 72 caracteres.");
+                    }
+                    Organizacao organizacao = organizacoes.findByNomeOrganizacaoIgnoreCase("UFSC / InPETU Hub")
+                            .or(() -> organizacoes.findByAtivoTrueOrderByNomeOrganizacao().stream().findFirst())
+                            .orElse(null);
+                    Usuario developer = new Usuario();
+                    developer.setNomeCompleto("Desenvolvedor / Admin");
+                    developer.setEmail(developerEmail);
+                    developer.setCargoVinculo("Desenvolvimento e administração");
+                    developer.setSenhaHash(passwordEncoder.encode(password));
+                    developer.setIdPerfil(5);
+                    developer.setIdPersona(1);
+                    if (organizacao != null) {
+                        developer.setIdOrganizacao(organizacao.getIdOrganizacao());
+                    }
+                    developer.setAtivo(true);
+                    usuarios.save(developer);
+                    developerExistente = true;
+                } else {
+                    contaExistente = true;
+                }
+            }
+            if (developerExistente || contaExistente || usuarios.existsByIdPerfil(1)) return;
             if (email == null || email.isBlank() || password == null || password.isBlank()) {
                 logger.warn("Nenhum coordenador foi criado: configure APP_ADMIN_EMAIL e APP_ADMIN_PASSWORD para inicializar o primeiro coordenador.");
                 return;
@@ -38,12 +67,9 @@ public class InitialAdminBootstrap {
             }
             String adminEmail = email.trim();
 
-            Organizacao organizacao = organizacoes.findByNomeOrganizacaoIgnoreCase("UFSC / InPETU Hub").orElseGet(() -> {
-                Organizacao nova = new Organizacao();
-                nova.setNomeOrganizacao("UFSC / InPETU Hub");
-                nova.setTipoOrganizacao("Instituição");
-                return organizacoes.save(nova);
-            });
+            Organizacao organizacao = organizacoes.findByNomeOrganizacaoIgnoreCase("UFSC / InPETU Hub")
+                    .or(() -> organizacoes.findByAtivoTrueOrderByNomeOrganizacao().stream().findFirst())
+                    .orElse(null);
             Usuario admin = new Usuario();
             admin.setNomeCompleto("Coordenador InPETU");
             admin.setEmail(adminEmail);
@@ -51,7 +77,9 @@ public class InitialAdminBootstrap {
             admin.setSenhaHash(passwordEncoder.encode(password));
             admin.setIdPerfil(1);
             admin.setIdPersona(1);
-            admin.setIdOrganizacao(organizacao.getIdOrganizacao());
+            if (organizacao != null) {
+                admin.setIdOrganizacao(organizacao.getIdOrganizacao());
+            }
             admin.setAtivo(true);
             usuarios.save(admin);
         };

@@ -137,7 +137,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const [auditActionFilter, setAuditActionFilter] = useState('Todas')
   const [crmSectionErrors, setCrmSectionErrors] = useState({})
   const extensionNavigation = optionalExtensions.flatMap(extension => extension.navigationItems?.(user) || [])
-  const nav = [{ name: 'Visão geral', icon: LayoutDashboard }, { name: 'Reservas', icon: CalendarDays }, { name: 'Cadastros', icon: Users }, { name: 'Espaços', icon: DoorOpen }, { name: 'Atendimento', icon: CircleHelp }, ...extensionNavigation, { name: 'Auditoria', icon: ListChecks }, ...(user?.perfil === 1 ? [{ name: 'Equipe', icon: ShieldCheck }] : [])]
+  const nav = [{ name: 'Visão geral', icon: LayoutDashboard }, { name: 'Reservas', icon: CalendarDays }, { name: 'Cadastros', icon: Users }, { name: 'Espaços', icon: DoorOpen }, { name: 'Atendimento', icon: CircleHelp }, ...extensionNavigation, { name: 'Auditoria', icon: ListChecks }, ...(user?.perfil === 1 || user?.perfil === 5 ? [{ name: 'Equipe', icon: ShieldCheck }] : [])]
   useEffect(() => {
     if (!mobileSidebarOpen) {
       if (mobileSidebarWasOpen.current) {
@@ -236,7 +236,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
           organizacao: orgById.get(person.idOrganizacao)?.nomeOrganizacao || 'Não informada',
         })))
         setPartners(users.filter(person => person.idPerfil === 4 && person.ativo && person.idOrganizacao && orgById.get(person.idOrganizacao)?.ativo !== false).map(person => ({ id: person.idOrganizacao, userId: person.idUsuario, name: orgById.get(person.idOrganizacao)?.nomeOrganizacao || person.nomeCompleto, contact: person.nomeCompleto, email: person.email, phone: person.telefone, cargoVinculo: person.cargoVinculo, dataCadastro: person.dataCadastro, ativo: person.ativo, persona: person.idPersona, status: person.idPersona ? 'Persona definida' : 'Aguardando persona' })))
-        setStaff(users.filter(person => person.idPerfil < 4))
+        setStaff(users.filter(person => [1, 2, 3, 5].includes(person.idPerfil)))
       }
       if (questions) {
         setTickets(questions)
@@ -1155,14 +1155,14 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
           return <ExtensionPanel key={`${section}-${index}`} API={API} request={request} CrmTitle={CrmTitle} notify={notify} />
         })}
         {section === 'Auditoria' && <><CrmTitle title="Histórico de ações" description="Acompanhe quem fez cada alteração, quando aconteceu e qual registro foi afetado." /><div className="crm-panel audit-panel"><div className="audit-toolbar"><label className="audit-search"><Search size={17} /><input type="search" value={auditQuery} onChange={event => setAuditQuery(event.target.value)} placeholder="Buscar por responsável, ação ou registro" aria-label="Buscar no histórico de auditoria" /></label><label className="audit-filter-label">Ação<select value={auditActionFilter} onChange={event => setAuditActionFilter(event.target.value)} aria-label="Filtrar por ação"><option>Todas</option>{auditActions.map(action => <option key={action}>{action}</option>)}</select></label><span className="audit-result-count">{filteredAuditItems.length} {filteredAuditItems.length === 1 ? 'registro' : 'registros'}</span></div><div className="audit-table-wrap"><table className="data-table audit-table"><thead><tr><th>Data e hora</th><th>Responsável</th><th>Ação</th><th>Registro afetado</th><th>Detalhes</th></tr></thead><tbody>{filteredAuditItems.map((item, i) => <tr key={`${item.time}-${item.user}-${i}`}><td><span className="audit-time">{item.time}</span></td><td><strong className="audit-actor">{item.user}</strong></td><td><span className="audit-action"><i />{item.action}</span></td><td><strong className="audit-target">{item.target}</strong></td><td className="audit-detail">{item.detail}</td></tr>)}</tbody></table>{filteredAuditItems.length === 0 && <div className="audit-empty"><ListChecks size={22} /><strong>{auditItems.length ? 'Nenhum registro encontrado' : 'Ainda não há ações registradas'}</strong><span>{auditItems.length ? 'Tente ajustar a busca ou o filtro selecionado.' : 'As alterações realizadas pela equipe aparecerão aqui.'}</span></div>}</div></div></>}
-        {section === 'Equipe' && user.perfil === 1 && <><CrmTitle title="Equipe e permissões" description="Gerencie os usuários e papéis de acesso ao InPETU Connect." /><div className="crm-panel"><table className="data-table"><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Status</th><th>Ficha</th></tr></thead><tbody>{managedUsers.map(person => {
+        {section === 'Equipe' && (user.perfil === 1 || user.perfil === 5) && <><CrmTitle title="Equipe e permissões" description="Gerencie os usuários e papéis de acesso ao InPETU Connect." /><div className="crm-panel"><table className="data-table"><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Status</th><th>Ficha</th></tr></thead><tbody>{managedUsers.map(person => {
           const isCurrentUser = person.idUsuario === user.idUsuario
           return <tr key={person.idUsuario}>
             <td><div className="team-person-cell"><Avatar user={person} tamanho={34} /><span><strong>{person.nomeCompleto}</strong><small>{person.cargoVinculo || person.organizacao || 'Sem vínculo informado'}</small></span></div></td>
             <td>{person.email}</td>
             <td>{getProfileRoleLabel(person)}</td>
             <td><span className={`status-pill ${person.ativo ? 'status-confirmed' : 'status-cancelled'}`}><i />{person.ativo ? 'Ativo' : 'Inativo'}</span></td>
-            <td>{isCurrentUser ? <span className="table-action-disabled" title="Você não pode alterar seu próprio perfil">Seu perfil</span> : <button type="button" className="table-action" onClick={() => openUserFicha(person)}>Abrir ficha</button>}</td>
+            <td>{isCurrentUser ? <span className="table-action-disabled" title="Você não pode alterar seu próprio perfil">Seu perfil</span> : <><button type="button" className="table-action" onClick={() => openUserFicha(person)}>Abrir ficha</button>{user.perfil === 5 && person.idPerfil !== 5 && <button type="button" className="table-action" onClick={async () => { try { await request(`/usuarios/${person.idUsuario}/promover-desenvolvedor`, { method: 'POST' }); const codigo = window.prompt('Informe o código de seis dígitos enviado por e-mail') ; if (!codigo) return; await request(`/usuarios/${person.idUsuario}/promover-desenvolvedor/confirmar`, { method: 'POST', body: JSON.stringify({ codigo }) }); notify('Usuário promovido a Desenvolvedor / Admin.') } catch (error) { notify(error.message) } }}>Promover</button>}</>}</td>
           </tr>
         })}</tbody></table></div></>}
       </div></main>{toast && <div className="toast"><Check size={17} />{toast}</div>}

@@ -14,6 +14,7 @@ import com.inpetu.connect.repository.LogAuditoriaRepository;
 import com.inpetu.connect.repository.OrganizacaoRepository;
 import com.inpetu.connect.repository.UsuarioRepository;
 import com.inpetu.connect.repository.DuvidaAtendimentoRepository;
+import com.inpetu.connect.service.EmailSender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -37,6 +38,9 @@ import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -51,8 +55,177 @@ class UsuarioControllerTest {
     @Mock UsuarioFotoRepository fotos;
     @Mock JwtService jwt;
     @Mock UserDetailsService userDetailsService;
+    @Mock EmailSender emailSender;
     @Mock Authentication authentication;
     @InjectMocks UsuarioController controller;
+
+    @Test
+    void codigoPromocaoUsadoUmaVezERejeitadoNaSegundaTentativa() {
+        Usuario desenvolvedor = new Usuario();
+        desenvolvedor.setIdUsuario(1);
+        desenvolvedor.setEmail("dev@example.org");
+        desenvolvedor.setIdPerfil(5);
+        Usuario alvo = new Usuario();
+        alvo.setIdUsuario(9);
+        alvo.setEmail("alvo@example.org");
+        alvo.setIdPerfil(4);
+        alvo.setCodigoPromocaoHash(hashUnchecked("123456"));
+        alvo.setCodigoPromocaoExpiraEm(LocalDateTime.now().plusMinutes(5));
+        when(authentication.getName()).thenReturn("dev@example.org");
+        when(usuarios.findByEmailIgnoreCase("dev@example.org")).thenReturn(Optional.of(desenvolvedor));
+        when(usuarios.findById(9)).thenReturn(Optional.of(alvo));
+        when(usuarios.save(alvo)).thenReturn(alvo);
+
+        UsuarioResumo promovido = controller.confirmarPromocaoDesenvolvedor(
+            9, java.util.Map.of("codigo", "123456"), authentication);
+
+        assertEquals(5, promovido.idPerfil());
+        assertEquals(5, alvo.getIdPerfil());
+        assertNull(alvo.getCodigoPromocaoHash());
+
+        ResponseStatusException reuse = assertThrows(ResponseStatusException.class,
+            () -> controller.confirmarPromocaoDesenvolvedor(
+                9, java.util.Map.of("codigo", "123456"), authentication));
+        assertEquals(HttpStatus.BAD_REQUEST, reuse.getStatusCode());
+    }
+
+    @Test
+    void desenvolvedorSemCodigoNaoPromove() {
+        Usuario desenvolvedor = new Usuario();
+        desenvolvedor.setIdUsuario(1);
+        desenvolvedor.setEmail("dev@example.org");
+        desenvolvedor.setIdPerfil(5);
+        Usuario alvo = new Usuario();
+        alvo.setIdUsuario(9);
+        alvo.setIdPerfil(4);
+        when(authentication.getName()).thenReturn("dev@example.org");
+        when(usuarios.findByEmailIgnoreCase("dev@example.org")).thenReturn(Optional.of(desenvolvedor));
+        when(usuarios.findById(9)).thenReturn(Optional.of(alvo));
+
+        ResponseStatusException invalid = assertThrows(ResponseStatusException.class,
+            () -> controller.confirmarPromocaoDesenvolvedor(9, java.util.Map.of(), authentication));
+
+        assertEquals(HttpStatus.BAD_REQUEST, invalid.getStatusCode());
+        verify(usuarios, never()).save(any());
+        assertEquals(4, alvo.getIdPerfil());
+    }
+
+    @Test
+    void codigoErradoRecusadoComUmQuatroCincoSeis() {
+        Usuario desenvolvedor = new Usuario();
+        desenvolvedor.setIdUsuario(1);
+        desenvolvedor.setEmail("dev@example.org");
+        desenvolvedor.setIdPerfil(5);
+        Usuario alvo = new Usuario();
+        alvo.setIdUsuario(9);
+        alvo.setIdPerfil(4);
+        alvo.setCodigoPromocaoHash(hashUnchecked("123456"));
+        alvo.setCodigoPromocaoExpiraEm(LocalDateTime.now().plusMinutes(5));
+        when(authentication.getName()).thenReturn("dev@example.org");
+        when(usuarios.findByEmailIgnoreCase("dev@example.org")).thenReturn(Optional.of(desenvolvedor));
+        when(usuarios.findById(9)).thenReturn(Optional.of(alvo));
+
+        ResponseStatusException invalid = assertThrows(ResponseStatusException.class,
+            () -> controller.confirmarPromocaoDesenvolvedor(
+                9, java.util.Map.of("codigo", "1456"), authentication));
+
+        assertEquals(HttpStatus.BAD_REQUEST, invalid.getStatusCode());
+        verify(usuarios, never()).save(any());
+        assertEquals(4, alvo.getIdPerfil());
+    }
+
+    @Test
+    void codigoExpiradoERejeitado() {
+        Usuario desenvolvedor = new Usuario();
+        desenvolvedor.setIdUsuario(1);
+        desenvolvedor.setEmail("dev@example.org");
+        desenvolvedor.setIdPerfil(5);
+        Usuario alvo = new Usuario();
+        alvo.setIdUsuario(9);
+        alvo.setIdPerfil(4);
+        alvo.setCodigoPromocaoHash(hashUnchecked("123456"));
+        alvo.setCodigoPromocaoExpiraEm(LocalDateTime.now().minusMinutes(1));
+        when(authentication.getName()).thenReturn("dev@example.org");
+        when(usuarios.findByEmailIgnoreCase("dev@example.org")).thenReturn(Optional.of(desenvolvedor));
+        when(usuarios.findById(9)).thenReturn(Optional.of(alvo));
+
+        ResponseStatusException expired = assertThrows(ResponseStatusException.class,
+            () -> controller.confirmarPromocaoDesenvolvedor(
+                9, java.util.Map.of("codigo", "123456"), authentication));
+
+        assertEquals(HttpStatus.BAD_REQUEST, expired.getStatusCode());
+        assertEquals(4, alvo.getIdPerfil());
+        verify(usuarios, never()).save(any());
+    }
+
+    @Test
+    void responsavelAusenteRecebe403ENaoSalvaPromocao() {
+        Usuario desenvolvedor = new Usuario();
+        desenvolvedor.setIdUsuario(1);
+        desenvolvedor.setEmail("dev@example.org");
+        desenvolvedor.setIdPerfil(5);
+        Usuario alvo = new Usuario();
+        alvo.setIdUsuario(9);
+        alvo.setIdPerfil(4);
+        alvo.setCodigoPromocaoHash(hashUnchecked("123456"));
+        alvo.setCodigoPromocaoExpiraEm(LocalDateTime.now().plusMinutes(5));
+        when(authentication.getName()).thenReturn("dev@example.org");
+        when(usuarios.findByEmailIgnoreCase("dev@example.org"))
+                .thenReturn(Optional.of(desenvolvedor), Optional.empty());
+        when(usuarios.findById(9)).thenReturn(Optional.of(alvo));
+
+        ResponseStatusException forbidden = assertThrows(ResponseStatusException.class,
+            () -> controller.confirmarPromocaoDesenvolvedor(
+                9, java.util.Map.of("codigo", "123456"), authentication));
+
+        assertEquals(HttpStatus.FORBIDDEN, forbidden.getStatusCode());
+        assertEquals("Responsável pela ação não identificado.", forbidden.getReason());
+        verify(usuarios, never()).save(any());
+        verify(auditoria, never()).save(any());
+        assertEquals(4, alvo.getIdPerfil());
+    }
+
+    @Test
+    void coordenadorPerfil1Recebe403NaPromocao() {
+        Usuario coordenador = new Usuario();
+        coordenador.setIdUsuario(1);
+        coordenador.setEmail("coord@example.org");
+        coordenador.setIdPerfil(1);
+        when(authentication.getName()).thenReturn("coord@example.org");
+        when(usuarios.findByEmailIgnoreCase("coord@example.org")).thenReturn(Optional.of(coordenador));
+
+        ResponseStatusException forbidden = assertThrows(ResponseStatusException.class,
+            () -> controller.solicitarPromocaoDesenvolvedor(9, authentication));
+
+        assertEquals(HttpStatus.FORBIDDEN, forbidden.getStatusCode());
+        verify(usuarios, never()).findById(any());
+        verifyNoInteractions(emailSender);
+    }
+
+    @Test
+    void coordenadorNaoPodeDefinirPerfil5PorAlteracaoGenerica() {
+        Usuario alvo = new Usuario();
+        alvo.setIdUsuario(9);
+        alvo.setEmail("alvo@example.org");
+        alvo.setIdPerfil(4);
+
+        ResponseStatusException invalidProfile = assertThrows(ResponseStatusException.class,
+            () -> controller.alterarPerfil(9, java.util.Map.of("idPerfil", 5), authentication));
+
+        assertEquals(HttpStatus.BAD_REQUEST, invalidProfile.getStatusCode());
+        verify(usuarios, never()).save(any());
+        assertEquals(4, alvo.getIdPerfil());
+    }
+
+    private static String hashUnchecked(String code) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return java.util.HexFormat.of().formatHex(
+                digest.digest(code.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 
     @Test
     void excluiCadastroPublicoComMotivoERegistraAuditoria() {
@@ -64,7 +237,7 @@ class UsuarioControllerTest {
         coordenador.setIdUsuario(1);
         when(usuarios.findById(9)).thenReturn(Optional.of(solicitante));
         when(authentication.getName()).thenReturn("coord@example.org");
-        when(usuarios.findByEmail("coord@example.org")).thenReturn(Optional.of(coordenador));
+        when(usuarios.findByEmailIgnoreCase("coord@example.org")).thenReturn(Optional.of(coordenador));
         when(usuarios.save(solicitante)).thenReturn(solicitante);
 
         var result = controller.excluirCadastro(9,
@@ -126,7 +299,7 @@ class UsuarioControllerTest {
         when(usuarios.findById(9)).thenReturn(Optional.of(solicitante));
         when(usuarios.save(solicitante)).thenReturn(solicitante);
         when(authentication.getName()).thenReturn("coord@example.org");
-        when(usuarios.findByEmail("coord@example.org")).thenReturn(Optional.of(coordenador));
+        when(usuarios.findByEmailIgnoreCase("coord@example.org")).thenReturn(Optional.of(coordenador));
 
         UsuarioResumo result = controller.alterarPerfil(9, java.util.Map.of("idPerfil", 3), authentication);
 
@@ -145,6 +318,8 @@ class UsuarioControllerTest {
         Organizacao organizacao = new Organizacao();
         organizacao.setIdOrganizacao(12);
         organizacao.setNomeOrganizacao("InPETU Labs");
+        Usuario staff = new Usuario();
+        staff.setIdUsuario(3);
         when(usuarios.findByEmailIgnoreCase("novo@exemplo.org")).thenReturn(Optional.empty());
         when(organizacoes.findByNomeOrganizacaoIgnoreCase("InPETU Labs")).thenReturn(Optional.of(organizacao));
         when(usuarios.save(any(Usuario.class))).thenAnswer(invocation -> {
@@ -153,7 +328,7 @@ class UsuarioControllerTest {
             return usuario;
         });
         when(authentication.getName()).thenReturn("staff@example.org");
-        when(usuarios.findByEmail("staff@example.org")).thenReturn(Optional.of(new Usuario()));
+        when(usuarios.findByEmailIgnoreCase("staff@example.org")).thenReturn(Optional.of(staff));
         when(passwordEncoder.encode("SenhaSegura123!")).thenReturn("bcrypt-hash");
 
         UsuarioResumo result = controller.criarCadastro(
@@ -200,6 +375,8 @@ class UsuarioControllerTest {
         Organizacao organizacao = new Organizacao();
         organizacao.setIdOrganizacao(12);
         organizacao.setNomeOrganizacao("InPETU Labs");
+        Usuario staff = new Usuario();
+        staff.setIdUsuario(3);
         when(usuarios.findById(9)).thenReturn(Optional.of(solicitante));
         when(usuarios.findByEmailIgnoreCase("joana.nova@exemplo.org")).thenReturn(Optional.empty());
         when(organizacoes.findById(12)).thenReturn(Optional.of(organizacao));
@@ -207,7 +384,7 @@ class UsuarioControllerTest {
         when(usuarios.save(solicitante)).thenReturn(solicitante);
         when(organizacoes.save(organizacao)).thenReturn(organizacao);
         when(authentication.getName()).thenReturn("staff@example.org");
-        when(usuarios.findByEmail("staff@example.org")).thenReturn(Optional.of(new Usuario()));
+        when(usuarios.findByEmailIgnoreCase("staff@example.org")).thenReturn(Optional.of(staff));
 
         UsuarioResumo result = controller.editarCadastro(9,
                 new CadastroEdicaoRequest(" Joana Souza ", " JOANA.NOVA@EXEMPLO.ORG ",
@@ -260,7 +437,6 @@ class UsuarioControllerTest {
         novaOrganizacao.setIdOrganizacao(13);
         when(authentication.getName()).thenReturn("joana@example.org");
         when(usuarios.findByEmailIgnoreCase("joana@example.org")).thenReturn(Optional.of(solicitante));
-        when(usuarios.findByEmail("joana@example.org")).thenReturn(Optional.of(solicitante));
         when(organizacoes.findById(12)).thenReturn(Optional.of(organizacao));
         when(organizacoes.findByNomeOrganizacaoIgnoreCase("InPETU Hub")).thenReturn(Optional.empty());
         when(organizacoes.save(any(Organizacao.class))).thenAnswer(invocation -> {
@@ -297,7 +473,6 @@ class UsuarioControllerTest {
         solicitante.setSenhaHash("hash-antigo");
         when(authentication.getName()).thenReturn("joana@example.org");
         when(usuarios.findByEmailIgnoreCase("joana@example.org")).thenReturn(Optional.of(solicitante));
-        when(usuarios.findByEmail("joana@example.org")).thenReturn(Optional.of(solicitante));
         when(passwordEncoder.matches("SenhaAtual123!", "hash-antigo")).thenReturn(true);
         when(passwordEncoder.matches("SenhaNova123!", "hash-antigo")).thenReturn(false);
         when(passwordEncoder.encode("SenhaNova123!")).thenReturn("hash-novo");
@@ -354,7 +529,6 @@ class UsuarioControllerTest {
         when(usuarios.findById(27)).thenReturn(Optional.of(alvo));
         when(auditoria.countRecentPasswordResets(eq(1), any())).thenReturn(0L);
         when(passwordEncoder.encode(anyString())).thenReturn("bcrypt-hash");
-        when(usuarios.findByEmail("admin@example.org")).thenReturn(Optional.of(admin));
 
         var result = controller.redefinirSenha(27,
                 new com.inpetu.connect.dto.RedefinirSenhaRequest(true, null), authentication);
@@ -486,7 +660,6 @@ class UsuarioControllerTest {
         UsuarioFoto persistedPhoto = new UsuarioFoto();
         when(authentication.getName()).thenReturn("joana@example.org");
         when(usuarios.findByEmailIgnoreCase("joana@example.org")).thenReturn(Optional.of(solicitante));
-        when(usuarios.findByEmail("joana@example.org")).thenReturn(Optional.of(solicitante));
         when(fotos.findById(27)).thenReturn(Optional.of(persistedPhoto));
 
         var result = controller.atualizarMinhaFoto(upload, authentication);

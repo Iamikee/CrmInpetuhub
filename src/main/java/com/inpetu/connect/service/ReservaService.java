@@ -184,7 +184,9 @@ public class ReservaService {
         Usuario responsavel = usuarioAtivo(email);
         Reserva reserva = reservas.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reserva não encontrada."));
-        boolean equipe = responsavel.getIdPerfil() != null && responsavel.getIdPerfil() < 4;
+        boolean equipe = responsavel.getIdPerfil() != null
+                && (responsavel.getIdPerfil() == 1 || responsavel.getIdPerfil() == 2
+                    || responsavel.getIdPerfil() == 3 || responsavel.getIdPerfil() == 5);
         if (!equipe && !reserva.getIdSolicitante().equals(responsavel.getIdUsuario()))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você não pode cancelar esta reserva.");
         if ("Cancelada".equals(reserva.getStatusReserva()))
