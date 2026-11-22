@@ -68,4 +68,22 @@ class ApiExceptionHandlerTest {
         assertEquals("Informe um celular no formato (48) 99999-9999.",
                 ((Map<?, ?>) body.get("errors")).get("telefone"));
     }
+
+    @Test
+    void preservesPortugueseBusinessValidationMessagesInBadRequestResponse() throws NoSuchMethodException {
+        var bindingResult = new BeanPropertyBindingResult(new Object(), "cadastro");
+        bindingResult.addError(new FieldError("cadastro", "nomeCompleto", null,
+                false, new String[] { "Pattern.cadastro.nomeCompleto", "Pattern" },
+                null, "Use apenas letras no nome."));
+
+        Method method = ApiExceptionHandlerTest.class
+                .getDeclaredMethod("preservesPortugueseBusinessValidationMessagesInBadRequestResponse");
+        var response = handler.handleValidation(
+                new MethodArgumentNotValidException(new MethodParameter(Objects.requireNonNull(method), -1), bindingResult));
+        var body = Objects.requireNonNull(response.getBody());
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("Use apenas letras no nome.", body.get("message"));
+        assertEquals("Use apenas letras no nome.", ((Map<?, ?>) body.get("errors")).get("nomeCompleto"));
+    }
 }

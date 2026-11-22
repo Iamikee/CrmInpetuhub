@@ -5,7 +5,6 @@ const stylesheetPaths = [
   './reference.css',
   './design-system.css',
   './brand-theme.css',
-  './mural/mural.css',
 ]
 const styleElements = []
 

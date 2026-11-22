@@ -83,10 +83,13 @@ describe('Login password visibility', () => {
 describe('Public signup phone format', () => {
   it('requires a surname before sending a signup request', async () => {
     render(<SignupPage onBack={vi.fn()} onCodeSent={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText(/Nome completo e sobrenome/), { target: { value: 'Ana' } })
+    const nameInput = screen.getByLabelText(/Nome completo e sobrenome/)
+    fireEvent.change(nameInput, { target: { value: 'Ana' } })
     fireEvent.submit(screen.getByRole('button', { name: /Criar conta/ }).closest('form'))
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Informe nome e sobrenome.')
+    const nameError = await screen.findByText('Informe nome e sobrenome')
+    expect(nameError.id).toBe('signup-name-error')
+    expect(nameInput.getAttribute('aria-describedby')).toBe('signup-name-error')
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 

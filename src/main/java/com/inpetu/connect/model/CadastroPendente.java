@@ -29,7 +29,7 @@ public class CadastroPendente {
     @Column(name = "telefone", length = 20)
     private String telefone;
 
-    @Column(name = "cargo_vinculo", length = 100)
+    @Column(name = "cargo_vinculo", length = 80)
     private String cargoVinculo;
 
     @Column(name = "nome_organizacao", nullable = false, length = 100)

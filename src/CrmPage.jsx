@@ -3,6 +3,7 @@ import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react'
 import { ArrowRight, ArrowUpRight, Bell, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, DoorOpen, Download, Filter, LayoutDashboard, ListChecks, Mail, MapPin, Menu as MenuIcon, MessageCircle, Moon, MoreHorizontal, Plus, Search, ShieldCheck, Sun, Users, X } from 'lucide-react'
 import { API, addMinutesToTime, applyThemePreference, Avatar, Button, ClientProfileDialog, CrmTitle, getProfileRoleLabel, getReservationStartError, getSaoPauloDateTime, hasPhoneInput, ImageUploadField, isValidPhoneNumber, Kpi, LoginInline, Logo, Modal, normalizePhoneToE164, NotificationCenter, PhoneInput, ProfileDialog, readThemePreference, Title, clearStoredUser, formatTimeForDisplay, isGuidedTour, localDateValue, omitPersona, request, reservationStatusLabel, storeUser, unavailableDeadlineLabel } from './App.jsx'
 import { toNumberOrEmpty } from './numericInput.js'
+import { normalizeEmail, normalizeFullName, sanitizeNameInput, validateIdentityFields } from './validators.js'
 import { getApprovalMessage, getHoursForDate, getIsoDayOfWeek, getLatestStartTime, validateOperatingHours } from './openingHours.js'
 
 export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, reservations, setReservations, optionalExtensions = [] }) {
@@ -22,7 +23,10 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
   const [registrationCreateBusy, setRegistrationCreateBusy] = useState(false)
   const [registrationCreateError, setRegistrationCreateError] = useState('')
   const [registrationPhoneSubmitAttempted, setRegistrationPhoneSubmitAttempted] = useState(false)
+  const [registrationFieldsTouched, setRegistrationFieldsTouched] = useState({})
   const [newRegistration, setNewRegistration] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '' })
+  const registrationFieldErrors = validateIdentityFields(newRegistration)
+  const visibleRegistrationError = field => (registrationPhoneSubmitAttempted || registrationFieldsTouched[field]) ? registrationFieldErrors[field] : ''
   const [reservationEditTarget, setReservationEditTarget] = useState(null)
   const [reservationEditForm, setReservationEditForm] = useState(null)
   const [reservationEditError, setReservationEditError] = useState('')
@@ -492,6 +496,11 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
     event.preventDefault()
     setRegistrationPhoneSubmitAttempted(true)
     if (registrationCreateBusy) return
+    if (Object.keys(registrationFieldErrors).length) return
+    if (newRegistration.senha.length < 8 || newRegistration.senha.length > 64) {
+      setRegistrationCreateError('A senha deve ter de 8 a 64 caracteres.')
+      return
+    }
     if (hasPhoneInput(newRegistration.telefone) && !isValidPhoneNumber(newRegistration.telefone)) {
       return
     }
@@ -502,8 +511,8 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
         method: 'POST',
         body: JSON.stringify({
           ...newRegistration,
-          nomeCompleto: newRegistration.nomeCompleto.trim(),
-          email: newRegistration.email.trim(),
+          nomeCompleto: normalizeFullName(newRegistration.nomeCompleto),
+          email: normalizeEmail(newRegistration.email),
           telefone: normalizePhoneToE164(newRegistration.telefone),
           organizacao: newRegistration.organizacao.trim(),
           cargoVinculo: newRegistration.cargoVinculo.trim(),
@@ -522,6 +531,7 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       setClientUsers(items => [{ ...created, organizacao: newRegistration.organizacao.trim() }, ...items])
       setNewRegistration({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '' })
       setRegistrationPhoneSubmitAttempted(false)
+      setRegistrationFieldsTouched({})
       setRegistrationCreateOpen(false)
       notify('Cadastro criado e registrado na auditoria.')
     } catch (error) {
@@ -1188,15 +1198,15 @@ export default function Crm({ user, setUser, onReturnHome, spaces, setSpaces, re
       <Button icon={Check} disabled={!negotiationNote.trim() || negotiationBusy} onClick={recordNegotiationAndApprove}>{negotiationBusy ? 'Registrando...' : 'Registrar negociação e aprovar'}</Button>
     </Modal>
     <ClientProfileDialog key={clientProfile?.idUsuario || 'closed'} client={clientProfile} reservations={reservations} tickets={tickets} auditItems={auditItems} close={() => setClientProfile(null)} onSave={saveClientProfile} onPersona={saveClientPersona} onRole={saveRole} canManageRole={user.perfil === 1 && clientProfile?.idUsuario !== user.idUsuario} onDeactivate={deactivateClient} canDeactivate={user.perfil === 1} canResetPassword={user.perfil === 1} onResetPassword={(target, payload) => request(`/usuarios/${target.idUsuario}/redefinir-senha`, { method: 'POST', body: JSON.stringify(payload) })} />
-    <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError(''); setRegistrationPhoneSubmitAttempted(false) } }} title="Criar cadastro para uma organização">
-      <form className="form-stack" onSubmit={createRegistration}>
+    <Modal open={registrationCreateOpen} close={() => { if (!registrationCreateBusy) { setRegistrationCreateOpen(false); setRegistrationCreateError(''); setRegistrationPhoneSubmitAttempted(false); setRegistrationFieldsTouched({}) } }} title="Criar cadastro para uma organização">
+      <form className="form-stack" noValidate onSubmit={createRegistration}>
         <p className="access-intro">Cadastre a organização e uma pessoa responsável. A pessoa entrará usando e-mail e senha.</p>
-        <label>Nome da organização<input required maxLength={100} value={newRegistration.organizacao} onChange={event => setNewRegistration({ ...newRegistration, organizacao: event.target.value })} /></label>
-        <label>Nome e sobrenome do responsável<input required maxLength={100} value={newRegistration.nomeCompleto} onChange={event => setNewRegistration({ ...newRegistration, nomeCompleto: event.target.value })} /></label>
-        <label>E-mail<input required type="email" maxLength={100} value={newRegistration.email} onChange={event => setNewRegistration({ ...newRegistration, email: event.target.value })} /></label>
+        <label>Nome da organização<input id="crm-organization" required maxLength={100} className={visibleRegistrationError('organizacao') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleRegistrationError('organizacao'))} aria-describedby={visibleRegistrationError('organizacao') ? 'crm-organization-error' : undefined} value={newRegistration.organizacao} onChange={event => setNewRegistration({ ...newRegistration, organizacao: event.target.value })} onBlur={() => setRegistrationFieldsTouched(current => ({ ...current, organizacao: true }))} />{visibleRegistrationError('organizacao') && <small id="crm-organization-error" className="field-validation-error" aria-live="polite">{visibleRegistrationError('organizacao')}</small>}</label>
+        <label>Nome e sobrenome do responsável<input id="crm-name" required maxLength={100} className={visibleRegistrationError('nomeCompleto') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleRegistrationError('nomeCompleto'))} aria-describedby={visibleRegistrationError('nomeCompleto') ? 'crm-name-error' : undefined} value={newRegistration.nomeCompleto} onChange={event => setNewRegistration({ ...newRegistration, nomeCompleto: sanitizeNameInput(event.target.value) })} onBlur={() => { setRegistrationFieldsTouched(current => ({ ...current, nomeCompleto: true })); setNewRegistration(current => ({ ...current, nomeCompleto: normalizeFullName(current.nomeCompleto) })) }} />{visibleRegistrationError('nomeCompleto') && <small id="crm-name-error" className="field-validation-error" aria-live="polite">{visibleRegistrationError('nomeCompleto')}</small>}</label>
+        <label>E-mail<input id="crm-email" required type="email" maxLength={100} autoCapitalize="none" spellCheck="false" className={visibleRegistrationError('email') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleRegistrationError('email'))} aria-describedby={visibleRegistrationError('email') ? 'crm-email-error' : undefined} value={newRegistration.email} onChange={event => setNewRegistration({ ...newRegistration, email: normalizeEmail(event.target.value) })} onBlur={() => setRegistrationFieldsTouched(current => ({ ...current, email: true }))} />{visibleRegistrationError('email') && <small id="crm-email-error" className="field-validation-error" aria-live="polite">{visibleRegistrationError('email')}</small>}</label>
         <div className="form-row">
           <label>Telefone (opcional)<PhoneInput value={newRegistration.telefone} validationAttempted={registrationPhoneSubmitAttempted} onChange={telefone => setNewRegistration({ ...newRegistration, telefone })} /></label>
-          <label>Cargo ou vínculo<input required maxLength={100} value={newRegistration.cargoVinculo} onChange={event => setNewRegistration({ ...newRegistration, cargoVinculo: event.target.value })} /></label>
+          <label>Cargo ou vínculo<input id="crm-role" required maxLength={80} className={visibleRegistrationError('cargoVinculo') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleRegistrationError('cargoVinculo'))} aria-describedby={visibleRegistrationError('cargoVinculo') ? 'crm-role-error' : undefined} value={newRegistration.cargoVinculo} onChange={event => setNewRegistration({ ...newRegistration, cargoVinculo: event.target.value })} onBlur={() => setRegistrationFieldsTouched(current => ({ ...current, cargoVinculo: true }))} />{visibleRegistrationError('cargoVinculo') && <small id="crm-role-error" className="field-validation-error" aria-live="polite">{visibleRegistrationError('cargoVinculo')}</small>}</label>
         </div>
         <label>Senha inicial<input required minLength={8} maxLength={64} type="password" autoComplete="new-password" value={newRegistration.senha} onChange={event => setNewRegistration({ ...newRegistration, senha: event.target.value })} /></label>
         {registrationCreateError && <p className="form-message" role="alert">{registrationCreateError}</p>}

@@ -145,6 +145,55 @@ describe('CRM responsive lists', () => {
     expect(await screen.findByRole('complementary', { name: 'Navegação do painel' })).toBeTruthy()
     expect(document.activeElement).toBe(menuButton)
   })
+
+  it('blocks invalid CRM registrations and lowercases email before submitting', async () => {
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const path = new URL(input).pathname.replace('/api/v1', '')
+      if (options.method === 'POST' && path === '/usuarios/cadastros') {
+        return { ok: true, status: 201, text: async () => JSON.stringify({
+          idUsuario: 901,
+          idOrganizacao: 90,
+          nomeCompleto: 'João Silva',
+          email: 'pessoa@example.invalid',
+        }) }
+      }
+      const data = {
+        '/reservas': [],
+        '/usuarios': users,
+        '/organizacoes': organizations,
+        '/duvidas': [],
+        '/auditoria': [],
+      }[path] || []
+      return { ok: true, status: 200, text: async () => JSON.stringify(data) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<TestCrm />)
+
+    fireEventClick(await screen.findByRole('button', { name: 'Cadastros' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Novo cadastro' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Criar cadastro para uma organização' })
+    fireEvent.change(within(dialog).getByLabelText('Nome da organização'), { target: { value: '3M' } })
+    fireEvent.change(within(dialog).getByLabelText('Nome e sobrenome do responsável'), { target: { value: 'João 123 Silva' } })
+    const email = within(dialog).getByLabelText('E-mail')
+    fireEvent.change(email, { target: { value: '765765' } })
+    fireEvent.blur(email)
+    fireEvent.change(within(dialog).getByLabelText('Cargo ou vínculo'), { target: { value: 'QA' } })
+    fireEvent.change(within(dialog).getByLabelText('Senha inicial'), { target: { value: 'SenhaTeste123' } })
+    expect(await within(dialog).findByText('E-mail inválido')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Criar cadastro' }))
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false)
+
+    fireEvent.change(email, { target: { value: 'PESSOA@example.invalid' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Criar cadastro' }))
+    await screen.findByText('Cadastro criado e registrado na auditoria.')
+    const request = fetchMock.mock.calls.find(([, options]) => options?.method === 'POST')
+    expect(JSON.parse(request[1].body)).toMatchObject({
+      nomeCompleto: 'João Silva',
+      email: 'pessoa@example.invalid',
+      organizacao: '3M',
+      cargoVinculo: 'QA',
+    })
+  })
 })
 
 function fireEventClick(element) {
