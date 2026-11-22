@@ -3,6 +3,8 @@ package com.inpetu.connect.dto;
 import com.inpetu.connect.validation.TelefoneBrasileiro;
 import com.inpetu.connect.validation.NomeCompletoValido;
 import jakarta.validation.constraints.*;
+import jakarta.validation.constraints.AssertTrue;
+import com.inpetu.connect.util.DocumentoUtils;
 
 import java.util.Locale;
 
@@ -26,13 +28,30 @@ public record CadastroPublicoRequest(
     @Size(min = 2, max = 80, message = "O cargo ou vínculo deve ter de 2 a 80 caracteres.")
     @Pattern(regexp = "(?s)(?=(?:.*\\p{L}){2})[\\p{L}\\p{M}\\p{N} .,;:'’&()/_+\\-#]{2,80}", message = "Informe um cargo ou vínculo válido.")
     String cargoVinculo,
-    @NotBlank @Size(min = 8, max = 64) String senha
+    @NotBlank @Size(min = 8, max = 64) String senha,
+    @Pattern(regexp = "PF|PJ", message = "O tipo de documento deve ser PF ou PJ.") String tipoDocumento,
+    String documento
 ) {
+    public CadastroPublicoRequest(String nomeCompleto, String email, String telefone,
+                                  String organizacao, String cargoVinculo, String senha) {
+        this(nomeCompleto, email, telefone, organizacao, cargoVinculo, senha, "PF", null);
+    }
+
+    @AssertTrue(message = "CPF ou CNPJ inválido.")
+    public boolean isDocumentoValido() {
+        if (documento == null || documento.isBlank()) return true;
+        if ("PF".equals(tipoDocumento)) return DocumentoUtils.cpfValido(documento);
+        if ("PJ".equals(tipoDocumento)) return DocumentoUtils.cnpjValido(documento);
+        return false;
+    }
+
     public CadastroPublicoRequest {
         nomeCompleto = normalizarEspacos(nomeCompleto);
         email = email == null ? null : email.toLowerCase(Locale.ROOT);
         organizacao = apararEspacos(organizacao);
         cargoVinculo = apararEspacos(cargoVinculo);
+        tipoDocumento = tipoDocumento == null ? "PF" : tipoDocumento.toUpperCase(Locale.ROOT);
+        documento = documento == null ? null : documento.replaceAll("\\D", "");
     }
 
     private static String normalizarEspacos(String value) {
@@ -42,4 +61,5 @@ public record CadastroPublicoRequest(
     private static String apararEspacos(String value) {
         return value == null ? null : value.replaceAll("^ +| +$", "");
     }
+
 }

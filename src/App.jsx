@@ -68,9 +68,10 @@ export const clearStoredUser = () => {
   localStorage.removeItem('inpetu-token')
   sessionStorage.removeItem('inpetu-login-return-view')
 }
-const isCrmUser = user => [1, 2, 3].includes(Number(user?.perfil ?? user?.idPerfil))
+const isCrmUser = user => [1, 2, 3, 5].includes(Number(user?.perfil ?? user?.idPerfil))
 export const getSuccessfulLoginDestination = user => isCrmUser(user) ? '/paineladm' : null
 export const getProfileRoleLabel = user => ({
+  5: 'Desenvolvedor / Admin',
   1: 'Coordenador',
   2: 'Gestor de espaços',
   3: 'Atendente',
@@ -1043,7 +1044,7 @@ export function ProfileDialog({ open, close, user, onUserUpdate }) {
   const [visiblePasswords, setVisiblePasswords] = useState({})
   const photoInput = useRef(null)
   const perfilLabel = getProfileRoleLabel(user)
-  const isStaff = Number(user?.perfil) < 4
+  const isStaff = [1, 2, 3, 5].includes(Number(user?.perfil))
   const profileChanged = Boolean(profile) && (
     form.nomeCompleto !== (profile.nomeCompleto || '')
     || form.telefone !== (profile.telefone || '')

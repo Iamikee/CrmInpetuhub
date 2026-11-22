@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, CalendarDays, Check, Mail, MapPin, MessageCircle, Plus, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Avatar, Button, Logo, Modal, PasswordInput, PasswordRecoveryForm, PhoneInput, Title, calendarDaysUntil, formatBrazilianPhone, hasPhoneInput, isValidPhoneNumber, localDateValue, maskEmail, normalizePhoneToE164, request, reservationStatusClass, reservationStatusLabel, storeUser, uploadQuestion } from './App.jsx'
 import { CountUp, Reveal, Stagger, StaggerItem } from './motion/index.js'
-import { normalizeEmail, normalizeFullName, sanitizeNameInput, validateEmail, validateIdentityFields } from './validators.js'
+import { maskCpfCnpj, normalizeEmail, normalizeFullName, sanitizeCpfCnpj, sanitizeNameInput, validateCnpj, validateCpf, validateEmail, validateIdentityFields } from './validators.js'
 import { getIsoDayOfWeek } from './openingHours.js'
 import { filterReservations } from './reservationFilters.js'
 
@@ -44,7 +44,7 @@ export function AccessPage({ onLogin, onSignup }) {
 }
 
 export function SignupPage({ onBack, onCodeSent }) {
-  const [form, setForm] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '', confirmarSenha: '' })
+  const [form, setForm] = useState({ nomeCompleto: '', email: '', telefone: '', organizacao: '', cargoVinculo: '', senha: '', confirmarSenha: '', tipoDocumento: 'PF', documento: '' })
   const [status, setStatus] = useState('')
   const [phoneSubmitAttempted, setPhoneSubmitAttempted] = useState(false)
   const [validationAttempted, setValidationAttempted] = useState(false)
@@ -59,6 +59,8 @@ export function SignupPage({ onBack, onCodeSent }) {
     setPhoneSubmitAttempted(true)
     setValidationAttempted(true)
     if (Object.keys(fieldErrors).length) return
+    const documentoErro = form.tipoDocumento === 'PF' ? validateCpf(form.documento) : validateCnpj(form.documento)
+    if (form.documento && documentoErro) return setStatus(documentoErro)
     if (form.senha.length < 8 || form.senha.length > 64) return setStatus('A senha deve ter de 8 a 64 caracteres.')
     if (form.senha !== form.confirmarSenha) return setStatus('As senhas não coincidem.')
     if (hasPhoneInput(form.telefone) && !isValidPhoneNumber(form.telefone)) return
@@ -95,6 +97,8 @@ export function SignupPage({ onBack, onCodeSent }) {
         <label>Nome completo e sobrenome <span aria-hidden="true">*</span><input id="signup-name" required maxLength={100} autoComplete="name" className={visibleFieldError('nomeCompleto') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleFieldError('nomeCompleto'))} aria-describedby={visibleFieldError('nomeCompleto') ? 'signup-name-error' : undefined} value={form.nomeCompleto} onChange={e => setForm({ ...form, nomeCompleto: sanitizeNameInput(e.target.value) })} onBlur={() => { setTouched({ ...touched, nomeCompleto: true }); setForm(current => ({ ...current, nomeCompleto: normalizeFullName(current.nomeCompleto) })) }} />{visibleFieldError('nomeCompleto') && <small id="signup-name-error" className="field-validation-error" aria-live="polite">{visibleFieldError('nomeCompleto')}</small>}</label>
         <label>E-mail <span aria-hidden="true">*</span><input id="signup-email" required type="email" autoComplete="email" maxLength={100} autoCapitalize="none" spellCheck="false" className={visibleFieldError('email') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleFieldError('email'))} aria-describedby={visibleFieldError('email') ? 'signup-email-error' : undefined} value={form.email} onChange={e => setForm({ ...form, email: normalizeEmail(e.target.value) })} onBlur={() => setTouched({ ...touched, email: true })} />{visibleFieldError('email') && <small id="signup-email-error" className="field-validation-error" aria-live="polite">{visibleFieldError('email')}</small>}</label>
         <label>Telefone<PhoneInput value={form.telefone} onChange={telefone => setForm({ ...form, telefone })} validationAttempted={phoneSubmitAttempted} /></label>
+        <label>Tipo de documento<select id="signup-document-type" value={form.tipoDocumento} onChange={e => setForm({ ...form, tipoDocumento: e.target.value, documento: '' })}><option value="PF">Pessoa física (CPF)</option><option value="PJ">Pessoa jurídica (CNPJ)</option></select></label>
+        <label>{form.tipoDocumento === 'PF' ? 'CPF' : 'CNPJ'} <span aria-hidden="true">*</span><input id="signup-document" required inputMode="numeric" maxLength={18} value={form.documento} onChange={e => setForm({ ...form, documento: sanitizeCpfCnpj(e.target.value) })} onBlur={() => setForm(current => ({ ...current, documento: sanitizeCpfCnpj(current.documento) }))} /></label>
         <label>Organização <span aria-hidden="true">*</span><input id="signup-organization" required maxLength={100} className={visibleFieldError('organizacao') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleFieldError('organizacao'))} aria-describedby={visibleFieldError('organizacao') ? 'signup-organization-error' : undefined} value={form.organizacao} onChange={e => setForm({ ...form, organizacao: e.target.value })} onBlur={() => setTouched({ ...touched, organizacao: true })} />{visibleFieldError('organizacao') && <small id="signup-organization-error" className="field-validation-error" aria-live="polite">{visibleFieldError('organizacao')}</small>}</label>
         <label>Cargo ou vínculo <span aria-hidden="true">*</span><input id="signup-role" required maxLength={80} className={visibleFieldError('cargoVinculo') ? 'field-validation-input' : ''} aria-invalid={Boolean(visibleFieldError('cargoVinculo'))} aria-describedby={visibleFieldError('cargoVinculo') ? 'signup-role-error' : undefined} value={form.cargoVinculo} onChange={e => setForm({ ...form, cargoVinculo: e.target.value })} onBlur={() => setTouched({ ...touched, cargoVinculo: true })} />{visibleFieldError('cargoVinculo') && <small id="signup-role-error" className="field-validation-error" aria-live="polite">{visibleFieldError('cargoVinculo')}</small>}</label>
         <label>Senha <span aria-hidden="true">*</span><PasswordInput required minLength={8} maxLength={64} autoComplete="new-password" value={form.senha} onChange={e => setForm({ ...form, senha: e.target.value })} /></label>

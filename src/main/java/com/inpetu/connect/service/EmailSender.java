@@ -8,4 +8,6 @@ public interface EmailSender {
     void sendConfirmationCode(CadastroPendente pendente, String code, int validityMinutes);
 
     void sendPasswordResetCode(String email, String name, String code, int validityMinutes);
+
+    default void sendProfilePromotionCode(String email, String name, String code, int validityMinutes) {}
 }

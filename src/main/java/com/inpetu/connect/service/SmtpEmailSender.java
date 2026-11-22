@@ -66,6 +66,18 @@ public class SmtpEmailSender implements EmailSender {
             templates.passwordReset(name, code, validityMinutes), "redefinição");
     }
 
+    @Override
+    public void sendProfilePromotionCode(String email, String name, String code, int validityMinutes) {
+        if (code == null || !code.matches("\\d{6}")) {
+            throw new IllegalArgumentException("O código da promoção deve conter seis dígitos.");
+        }
+        brevo.send(email, "Código de promoção no InPETU Connect",
+            templates.notification(name, "Código de promoção",
+                "Use o código " + code + " para confirmar a promoção para Desenvolvedor / Admin. "
+                    + "O código expira em " + validityMinutes + " minutos."),
+            "promoção de perfil");
+    }
+
     private String maskedEmail(String email) {
         int at = email == null ? -1 : email.indexOf('@');
         if (at <= 0) return "***";

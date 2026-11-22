@@ -26,19 +26,22 @@ class InitialAdminBootstrapTest {
         ApplicationRunner runner = new InitialAdminBootstrap().bootstrapAdmin(usuarios, organizacoes, encoder, "", "");
         runner.run(mock(ApplicationArguments.class));
 
+        verify(usuarios).existsByIdPerfil(5);
         verify(usuarios).existsByIdPerfil(1);
         verifyNoMoreInteractions(usuarios);
         verifyNoInteractions(organizacoes, encoder);
     }
 
     @Test
-    void createsCoordinatorOnlyWhenCredentialsAreExplicitlyConfigured() throws Exception {
+    void createsDeveloperOnlyWhenCredentialsAreExplicitlyConfigured() throws Exception {
         UsuarioRepository usuarios = mock(UsuarioRepository.class);
         OrganizacaoRepository organizacoes = mock(OrganizacaoRepository.class);
         PasswordEncoder encoder = mock(PasswordEncoder.class);
         Organizacao organizacao = new Organizacao();
         organizacao.setIdOrganizacao(3);
+        when(usuarios.existsByIdPerfil(5)).thenReturn(false);
         when(usuarios.existsByIdPerfil(1)).thenReturn(false);
+        when(usuarios.findByEmailIgnoreCase("admin@example.test")).thenReturn(Optional.empty());
         when(organizacoes.findByNomeOrganizacaoIgnoreCase("UFSC / InPETU Hub")).thenReturn(Optional.of(organizacao));
         when(encoder.encode("Local-Bootstrap-Only-Secret")).thenReturn("bcrypt-hash");
 
@@ -49,7 +52,7 @@ class InitialAdminBootstrapTest {
         var captor = org.mockito.ArgumentCaptor.forClass(Usuario.class);
         verify(usuarios).save(captor.capture());
         assertEquals("admin@example.test", captor.getValue().getEmail());
-        assertEquals(1, captor.getValue().getIdPerfil());
+        assertEquals(5, captor.getValue().getIdPerfil());
         assertEquals(3, captor.getValue().getIdOrganizacao());
         assertEquals("bcrypt-hash", captor.getValue().getSenhaHash());
         verify(encoder).encode("Local-Bootstrap-Only-Secret");
@@ -60,14 +63,36 @@ class InitialAdminBootstrapTest {
         UsuarioRepository usuarios = mock(UsuarioRepository.class);
         OrganizacaoRepository organizacoes = mock(OrganizacaoRepository.class);
         PasswordEncoder encoder = mock(PasswordEncoder.class);
+        when(usuarios.existsByIdPerfil(5)).thenReturn(true);
         when(usuarios.existsByIdPerfil(1)).thenReturn(true);
 
         ApplicationRunner runner = new InitialAdminBootstrap().bootstrapAdmin(
             usuarios, organizacoes, encoder, "admin@example.test", "configured-value-long-enough");
         runner.run(mock(ApplicationArguments.class));
 
-        verify(usuarios).existsByIdPerfil(1);
+        verify(usuarios).existsByIdPerfil(5);
         verifyNoMoreInteractions(usuarios);
+        verifyNoInteractions(organizacoes, encoder);
+    }
+
+    @Test
+    void bootstrapContaExistenteNaoAlteraSenhaNemPerfil() throws Exception {
+        UsuarioRepository usuarios = mock(UsuarioRepository.class);
+        OrganizacaoRepository organizacoes = mock(OrganizacaoRepository.class);
+        PasswordEncoder encoder = mock(PasswordEncoder.class);
+        Usuario existente = new Usuario();
+        existente.setSenhaHash("hash-anterior");
+        existente.setIdPerfil(3);
+        when(usuarios.existsByIdPerfil(5)).thenReturn(false);
+        when(usuarios.findByEmailIgnoreCase("admin@example.test")).thenReturn(Optional.of(existente));
+
+        ApplicationRunner runner = new InitialAdminBootstrap().bootstrapAdmin(
+            usuarios, organizacoes, encoder, "admin@example.test", "configured-value-long-enough");
+        runner.run(mock(ApplicationArguments.class));
+
+        assertEquals(3, existente.getIdPerfil());
+        assertEquals("hash-anterior", existente.getSenhaHash());
+        verify(usuarios, never()).save(any(Usuario.class));
         verifyNoInteractions(organizacoes, encoder);
     }
 
@@ -81,7 +106,8 @@ class InitialAdminBootstrapTest {
         ApplicationRunner runner = bootstrap.bootstrapAdmin(usuarios, organizacoes, encoder, "admin@example.test", "short");
 
         assertThrows(IllegalStateException.class, () -> runner.run(mock(ApplicationArguments.class)));
-        verify(usuarios).existsByIdPerfil(1);
+        verify(usuarios).existsByIdPerfil(5);
+        verify(usuarios).findByEmailIgnoreCase("admin@example.test");
         verifyNoMoreInteractions(usuarios);
         verifyNoInteractions(organizacoes, encoder);
     }
